@@ -1,5 +1,8 @@
 import os
 
+from pathlib import Path
+
+from tools.install_support import _render_launcher_script
 from tools.install_support import available_profiles, ensure_manual_login_fallback
 from tools.install_support import write_json
 
@@ -27,6 +30,23 @@ def test_available_profiles_can_exclude_manual_login():
     assert [item["id"] for item in profiles] == ["openai_api:gpt-4.1"]
 
 
+def test_available_profiles_include_manual_login_when_requested():
+    settings = {
+        "llm_services": {
+            "chatgpt_login": {
+                "label": "ChatGPT Login",
+                "mode": "manual_login",
+                "available": True,
+                "models": ["chatgpt-login"],
+            }
+        }
+    }
+
+    profiles = available_profiles(settings, include_manual=True)
+
+    assert [item["id"] for item in profiles] == ["chatgpt_login:chatgpt-login"]
+
+
 def test_manual_login_fallback_populates_role_defaults():
     settings = {"llm_services": {}, "role_defaults": {}}
 
@@ -52,3 +72,10 @@ def test_write_json_overwrites_existing_readonly_file(tmp_path):
     write_json(target, {"ok": True})
 
     assert '"ok": true' in target.read_text(encoding="utf-8").lower()
+
+
+def test_render_launcher_script_includes_startup_precheck():
+    script = _render_launcher_script(Path(r"C:\Agentic\Test"))
+
+    assert 'set "REPO_DIR=C:\\Agentic\\Test"' in script
+    assert 'tools\\startup_checks.py' in script

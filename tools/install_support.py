@@ -26,6 +26,7 @@ SKIP_NAMES = {
 GIT_TOKEN_ENV = {"github": "GITHUB_TOKEN", "gitlab": "GITLAB_TOKEN"}
 MANUAL_LOGIN_SERVICE_ID = "chatgpt_login"
 MANUAL_LOGIN_PROFILE_ID = "chatgpt_login:chatgpt-login"
+LAUNCHER_FILENAME = "Iniciar_Agentic_Manager.cmd"
 
 
 def copy_repo(source: Path, target: Path, overwrite: bool = False) -> None:
@@ -57,7 +58,7 @@ def clean_target(target: Path) -> None:
 def build_default_settings(target_root: Path) -> dict:
     settings = json.loads(json.dumps(DEFAULT_SYSTEM_SETTINGS))
     settings["install"]["install_dir"] = str(target_root)
-    settings["install"]["launcher_path"] = str(target_root / "Iniciar_Agentic_Manager.cmd")
+    settings["install"]["launcher_path"] = str(target_root / LAUNCHER_FILENAME)
     return settings
 
 
@@ -160,4 +161,72 @@ def create_desktop_shortcut(launcher_path: Path, working_dir: Path) -> str | Non
     except (subprocess.CalledProcessError, OSError) as exc:
         return str(exc)
     return None
+
+
+def write_launcher_script(target_root: Path) -> Path:
+    launcher_path = target_root / LAUNCHER_FILENAME
+    launcher_content = _render_launcher_script(target_root.resolve())
+    launcher_path.write_text(launcher_content, encoding="utf-8", newline="\r\n")
+    return launcher_path
+
+
+def _render_launcher_script(repo_dir: Path) -> str:
+    repo_dir_str = str(repo_dir)
+    return (
+        "@echo off\n"
+        "setlocal\n\n"
+        f"set \"REPO_DIR={repo_dir_str}\"\n"
+        "set \"DASHBOARD_PORT=8888\"\n"
+        "set \"DASHBOARD_URL=http://localhost:%DASHBOARD_PORT%\"\n"
+        "set \"DASHBOARD_HEALTH_URL=http://127.0.0.1:%DASHBOARD_PORT%/\"\n\n"
+        "cd /d \"%REPO_DIR%\" || (\n"
+        "  echo No se pudo acceder al repositorio: %REPO_DIR%\n"
+        "  pause\n"
+        "  exit /b 1\n"
+        ")\n\n"
+        "set \"PYTHON_EXE=\"\n"
+        "set \"PYTHON_ARGS=\"\n"
+        "where py >nul 2>nul && (\n"
+        "  set \"PYTHON_EXE=py\"\n"
+        "  set \"PYTHON_ARGS=-3\"\n"
+        ")\n"
+        "if not defined PYTHON_EXE (\n"
+        "  where python >nul 2>nul && set \"PYTHON_EXE=python\"\n"
+        ")\n\n"
+        "if not defined PYTHON_EXE (\n"
+        "  echo No se encontro Python en PATH.\n"
+        "  echo Instala Python o agrega el ejecutable a PATH antes de iniciar el sistema.\n"
+        "  pause\n"
+        "  exit /b 1\n"
+        ")\n\n"
+        "\"%PYTHON_EXE%\" %PYTHON_ARGS% tools\\startup_checks.py\n"
+        "if errorlevel 1 exit /b 1\n\n"
+        "call :check_dashboard\n"
+        "if errorlevel 1 (\n"
+        "  echo Iniciando dashboard en %DASHBOARD_URL% ...\n"
+        "  start \"Agentic Manager Dashboard\" /D \"%REPO_DIR%\" \"%PYTHON_EXE%\" %PYTHON_ARGS% dashboard.py\n"
+        "  call :wait_dashboard\n"
+        "  if errorlevel 1 (\n"
+        "    echo El dashboard no respondio correctamente en %DASHBOARD_URL%.\n"
+        "    echo Ejecuta manualmente: cd /d \"%REPO_DIR%\" ^&^& \"%PYTHON_EXE%\" %PYTHON_ARGS% dashboard.py\n"
+        "    pause\n"
+        "    exit /b 1\n"
+        "  )\n"
+        ") else (\n"
+        "  echo El dashboard ya estaba corriendo y responde en %DASHBOARD_URL%.\n"
+        ")\n\n"
+        "start \"\" %DASHBOARD_URL%\n"
+        "exit /b 0\n\n"
+        ":check_dashboard\n"
+        "powershell -NoProfile -ExecutionPolicy Bypass -Command ^\n"
+        "  \"try { $r = Invoke-WebRequest -UseBasicParsing '%DASHBOARD_HEALTH_URL%' -TimeoutSec 3; if ($r.StatusCode -eq 200) { exit 0 } else { exit 1 } } catch { exit 1 }\"\n"
+        "exit /b %errorlevel%\n\n"
+        ":wait_dashboard\n"
+        "for /l %%I in (1,1,20) do (\n"
+        "  call :check_dashboard\n"
+        "  if not errorlevel 1 exit /b 0\n"
+        "  timeout /t 1 /nobreak >nul\n"
+        ")\n"
+        "exit /b 1\n"
+    )
 

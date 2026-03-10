@@ -11,6 +11,7 @@ from install_support import (
     build_default_settings,
     copy_repo,
     create_desktop_shortcut,
+    write_launcher_script,
     validate_git,
     validate_service,
     write_env,
@@ -39,9 +40,10 @@ def main() -> int:
     env_values.update(llm_env)
     settings["role_defaults"] = _select_role_defaults(settings)
 
+    launcher_path = write_launcher_script(target_root)
     write_json(target_root / "config" / "system_settings.json", settings)
     write_env(target_root / ".env", env_values)
-    create_desktop_shortcut(target_root / "Iniciar_Agentic_Manager.cmd", target_root)
+    create_desktop_shortcut(launcher_path, target_root)
 
     print("\nInstallation completed successfully.")
     print(f"Installed to: {target_root}")
