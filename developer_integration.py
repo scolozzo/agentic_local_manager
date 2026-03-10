@@ -17,22 +17,22 @@ if sys.stdout.encoding.lower() != 'utf-8':
 # Ensure veloxiq package is importable
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from VeloxIq.token_logger import TokenLogger, LLMCall
-from VeloxIq.reasoning_control import get_llm_params, classify_dev_task
-from VeloxIq.state_manager import StateManager
-from VeloxIq.memory_store import MemoryStore
-from VeloxIq.config_loader import get_gitlab_project_id, get_develop_branch
+from app_core.token_logger import TokenLogger, LLMCall
+from app_core.reasoning_control import get_llm_params, classify_dev_task
+from app_core.state_manager import StateManager
+from app_core.memory_store import MemoryStore
+from app_core.config_loader import get_gitlab_project_id, get_develop_branch
+from app_core.agent_config import compose_agent_prompt, get_agent, get_agent_model, load_repo_env
 
 # Load environment
-env_path = r"C:\Users\Lenovo\.gemini\antigravity\scratch\VeloxIq\.env"
-load_dotenv(env_path)
+load_repo_env()
 
 # Configuration
 GITLAB_URL = "https://gitlab.com/api/v4"
 GITLAB_TOKEN = os.getenv("GITLAB_TOKEN")
 ZAI_API_KEY = os.getenv("ZAI_API_KEY")
 ZAI_API_BASE = os.getenv("ZAI_API_BASE", "https://api.z.ai/api/paas/v4")
-ZAI_MODEL = os.getenv("ZAI_MODEL_DEV", os.getenv("ZAI_MODEL", "glm-4.7-flash"))
+ZAI_MODEL = get_agent_model("dev1", env_var="ZAI_MODEL_DEV", default=os.getenv("ZAI_MODEL", "glm-4.7-flash"))
 
 # Agent Mapping (login names used as assignee in local board)
 AGENT_CONFIG = {
@@ -48,23 +48,8 @@ _token_logger = TokenLogger()
 _memory_store = MemoryStore()
 _state_manager = StateManager(memory_store=_memory_store)
 
-# System prompt cache
-_cached_dev_prompt: str | None = None
-
-
-def _get_dev_system_prompt() -> str:
-    global _cached_dev_prompt
-    if _cached_dev_prompt is not None:
-        return _cached_dev_prompt
-    try:
-        with open(
-            r"C:\Users\Lenovo\.gemini\antigravity\scratch\config\prompts\dev_back.md",
-            "r", encoding="utf-8"
-        ) as f:
-            _cached_dev_prompt = f.read()
-    except Exception:
-        _cached_dev_prompt = "Expert developer. Kotlin + Spring Boot. Return concise code implementations."
-    return _cached_dev_prompt
+def _get_dev_system_prompt(agent_id: str) -> str:
+    return compose_agent_prompt(agent_id)
 
 
 def _gitlab_headers():
@@ -147,13 +132,14 @@ def generate_code_glm(prompt, task_summary="", task_id="", call_type="dev_task",
         "Authorization": f"Bearer {ZAI_API_KEY}",
         "Content-Type": "application/json",
     }
-    system_prompt = _get_dev_system_prompt()
+    system_prompt = _get_dev_system_prompt(agent_name if get_agent(agent_name) else "dev1")
     system_msg: dict = {"role": "system", "content": system_prompt}
-    if "minimax" in ZAI_MODEL.lower():
+    model_name = get_agent_model(agent_name if get_agent(agent_name) else "dev1", env_var="ZAI_MODEL_DEV", default=ZAI_MODEL)
+    if "minimax" in model_name.lower():
         system_msg["cache_control"] = {"type": "ephemeral"}
 
     task_type = classify_dev_task(task_summary) if task_summary else "tool_call_simple"
-    llm_params = get_llm_params(task_type, ZAI_MODEL)
+    llm_params = get_llm_params(task_type, model_name)
 
     data = {
         **llm_params,
@@ -168,9 +154,9 @@ def generate_code_glm(prompt, task_summary="", task_id="", call_type="dev_task",
             input_tok = usage.get("prompt_tokens", 0)
             output_tok = usage.get("completion_tokens", 0)
             reasoning_tok = usage.get("reasoning_tokens", 0)
-            cost = TokenLogger.calculate_cost(ZAI_MODEL, input_tok, output_tok, reasoning_tok)
+            cost = TokenLogger.calculate_cost(model_name, input_tok, output_tok, reasoning_tok)
             _token_logger.log_call(LLMCall(
-                agent_name=agent_name, model=ZAI_MODEL,
+                agent_name=agent_name, model=model_name,
                 input_tokens=input_tok, output_tokens=output_tok,
                 reasoning_tokens=reasoning_tok, cost_usd=cost,
                 task_id=task_id, call_type=call_type,
@@ -184,6 +170,9 @@ def generate_code_glm(prompt, task_summary="", task_id="", call_type="dev_task",
 
 def dev_loop(agent_id):
     config = AGENT_CONFIG.get(agent_id)
+    configured_agent = get_agent(agent_id) or {}
+    if configured_agent:
+        config = {"login": configured_agent.get("login", config["login"] if config else agent_id)}
     if not config:
         print(f"Error: Invalid agent_id {agent_id}")
         return

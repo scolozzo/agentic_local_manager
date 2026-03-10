@@ -2,26 +2,25 @@ import os
 import sys
 import requests
 import json
-from dotenv import load_dotenv
 from datetime import datetime
 
 # Ensure veloxiq package is importable
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from VeloxIq.token_logger import TokenLogger, LLMCall
-from VeloxIq.status_router import handle_pm_query, LocalBoardStatusClient
-from VeloxIq.memory_store import MemoryStore
-from VeloxIq.sprint_manager import parse_plan, create_sprint_from_plan, describe_execution_plan
+from app_core.token_logger import TokenLogger, LLMCall
+from app_core.status_router import handle_pm_query, LocalBoardStatusClient
+from app_core.memory_store import MemoryStore
+from app_core.sprint_manager import parse_plan, create_sprint_from_plan, describe_execution_plan
+from app_core.agent_config import compose_agent_prompt, get_agent_model, load_repo_env
 
 # Load environment
-env_path = r"C:\Users\Lenovo\.gemini\antigravity\scratch\VeloxIq\.env"
-load_dotenv(env_path)
+load_repo_env()
 
 # Configuration
 ZAI_API_BASE       = os.getenv("ZAI_API_BASE", "https://api.z.ai/api/paas/v4")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID")
-ZAI_MODEL_PM       = os.getenv("ZAI_MODEL_PM", os.getenv("ZAI_MODEL", "glm-4.7-flash"))
+ZAI_MODEL_PM       = get_agent_model("pm", env_var="ZAI_MODEL_PM", default=os.getenv("ZAI_MODEL", "glm-4.7-flash"))
 
 # Token Logger + Memory Store
 _token_logger = TokenLogger()
@@ -30,26 +29,8 @@ _memory_store = MemoryStore()
 # Status Router backed by local board (no HTTP)
 _status_client = LocalBoardStatusClient()
 
-# System prompt cache
-_cached_system_prompt: str | None = None
-
-
 def _get_system_prompt() -> str:
-    global _cached_system_prompt
-    if _cached_system_prompt is not None:
-        return _cached_system_prompt
-    try:
-        with open(
-            r"C:\Users\Lenovo\.gemini\antigravity\scratch\agent_manuals\pm_prompt.md",
-            "r", encoding="utf-8"
-        ) as f:
-            _cached_system_prompt = f.read()
-    except Exception:
-        _cached_system_prompt = (
-            "You are the Project Manager (PM) for VeloxIq. "
-            "Help the user manage tasks and get status."
-        )
-    return _cached_system_prompt
+    return compose_agent_prompt("pm")
 
 
 def block_task(task_id: str, reason: str):

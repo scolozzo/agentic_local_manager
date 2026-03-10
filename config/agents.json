@@ -1,12 +1,71 @@
 {
+  "version": 2,
+  "default_preset": "default_software_team",
+  "roles": {
+    "pm": {
+      "label": "Project Manager",
+      "prompt": "config/prompts/base/pm.md"
+    },
+    "developer": {
+      "label": "Developer",
+      "prompt": "config/prompts/base/developer.md"
+    },
+    "qa": {
+      "label": "Quality Assurance",
+      "prompt": "config/prompts/base/qa.md"
+    },
+    "orchestrator": {
+      "label": "Orchestrator",
+      "prompt": "config/prompts/base/orchestrator.md"
+    }
+  },
+  "stacks": {
+    "backend": {
+      "label": "Backend",
+      "stack_key": "BACK",
+      "prompts": {
+        "developer": "config/prompts/stacks/backend.md",
+        "qa": "config/prompts/stacks/qa_backend.md"
+      }
+    },
+    "front_web": {
+      "label": "Frontend Web",
+      "stack_key": "BO",
+      "prompts": {
+        "developer": "config/prompts/stacks/front_web.md",
+        "qa": "config/prompts/stacks/qa_front_web.md"
+      }
+    },
+    "front_mobile": {
+      "label": "Frontend Mobile",
+      "stack_key": "MOB",
+      "prompts": {
+        "developer": "config/prompts/stacks/front_mobile.md",
+        "qa": "config/prompts/stacks/qa_front_mobile.md"
+      }
+    },
+    "database": {
+      "label": "Database",
+      "stack_key": "BACK",
+      "prompts": {
+        "developer": "config/prompts/stacks/db.md",
+        "qa": "config/prompts/stacks/qa_backend.md"
+      }
+    }
+  },
   "agents": [
     {
       "id": "pm",
       "name": "PM Agent",
       "type": "pm",
+      "role": "pm",
       "script": "pm_integration.py",
-      "stack": "BACK",
-      "specialization": "backend",
+      "stack": "backend",
+      "stack_key": "BACK",
+      "specialization": "project_manager",
+      "base_prompt": "config/prompts/base/pm.md",
+      "stack_prompt": null,
+      "specialization_prompt": null,
       "provider": "zai",
       "model": "glm-4.7-flash",
       "log_file": "pm.log",
@@ -17,9 +76,14 @@
       "id": "orchestrator",
       "name": "Orchestrator",
       "type": "orchestrator",
+      "role": "orchestrator",
       "script": "orchestrator_integration.py",
-      "stack": "BACK",
+      "stack": "backend",
+      "stack_key": "BACK",
       "specialization": "orchestrator",
+      "base_prompt": "config/prompts/base/orchestrator.md",
+      "stack_prompt": null,
+      "specialization_prompt": null,
       "provider": "zai",
       "model": "glm-4.7-flash",
       "log_file": "orchestrator.log",
@@ -31,9 +95,14 @@
       "name": "Dev 1",
       "login": "botidev1",
       "type": "dev",
+      "role": "developer",
       "script": "developer_integration.py",
-      "stack": "BACK",
+      "stack": "backend",
+      "stack_key": "BACK",
       "specialization": "backend",
+      "base_prompt": "config/prompts/base/developer.md",
+      "stack_prompt": "config/prompts/stacks/backend.md",
+      "specialization_prompt": "config/prompts/specializations/dev_back.md",
       "provider": "zai",
       "model": "glm-4.7-flash",
       "log_file": "dev1.log",
@@ -45,9 +114,14 @@
       "name": "Dev 2",
       "login": "botidev2",
       "type": "dev",
+      "role": "developer",
       "script": "developer_integration.py",
-      "stack": "BACK",
+      "stack": "backend",
+      "stack_key": "BACK",
       "specialization": "backend",
+      "base_prompt": "config/prompts/base/developer.md",
+      "stack_prompt": "config/prompts/stacks/backend.md",
+      "specialization_prompt": "config/prompts/specializations/dev_back.md",
       "provider": "zai",
       "model": "glm-4.7-flash",
       "log_file": "dev2.log",
@@ -59,9 +133,14 @@
       "name": "Dev 3",
       "login": "botidev3",
       "type": "dev",
+      "role": "developer",
       "script": "developer_integration.py",
-      "stack": "BACK",
+      "stack": "backend",
+      "stack_key": "BACK",
       "specialization": "backend",
+      "base_prompt": "config/prompts/base/developer.md",
+      "stack_prompt": "config/prompts/stacks/backend.md",
+      "specialization_prompt": "config/prompts/specializations/dev_back.md",
       "provider": "zai",
       "model": "glm-4.7-flash",
       "log_file": "dev3.log",
@@ -72,9 +151,14 @@
       "id": "qa",
       "name": "QA Agent",
       "type": "qa",
+      "role": "qa",
       "script": "qa_integration.py",
-      "stack": "BACK",
+      "stack": "backend",
+      "stack_key": "BACK",
       "specialization": "qa_backend",
+      "base_prompt": "config/prompts/base/qa.md",
+      "stack_prompt": "config/prompts/stacks/qa_backend.md",
+      "specialization_prompt": "config/prompts/specializations/qa_back.md",
       "provider": "minimax",
       "model": "minimax-m2.5-standard",
       "log_file": "qa.log",
@@ -85,62 +169,93 @@
   "specializations": {
     "backend": {
       "label": "Backend API",
-      "stack": "BACK",
-      "prompt": "config/prompts/dev_back.md"
+      "role": "developer",
+      "stack": "backend",
+      "stack_key": "BACK",
+      "prompt": "config/prompts/specializations/dev_back.md"
     },
     "front_web": {
       "label": "Frontend Web (BO)",
-      "stack": "BO",
-      "prompt": "config/prompts/dev_bo_frontend.md"
+      "role": "developer",
+      "stack": "front_web",
+      "stack_key": "BO",
+      "prompt": "config/prompts/specializations/dev_bo_frontend.md"
     },
     "bo_backend": {
       "label": "BO Backend",
-      "stack": "BO",
-      "prompt": "config/prompts/dev_bo_backend.md"
+      "role": "developer",
+      "stack": "backend",
+      "stack_key": "BO",
+      "prompt": "config/prompts/specializations/dev_bo_backend.md"
     },
     "mob_android": {
       "label": "Mobile Android",
-      "stack": "MOB",
-      "prompt": "config/prompts/dev_mob_android.md"
+      "role": "developer",
+      "stack": "front_mobile",
+      "stack_key": "MOB",
+      "prompt": "config/prompts/specializations/dev_mob_android.md"
     },
     "mob_backend": {
       "label": "Mobile Backend",
-      "stack": "MOB",
-      "prompt": "config/prompts/dev_mob_backend.md"
+      "role": "developer",
+      "stack": "backend",
+      "stack_key": "MOB",
+      "prompt": "config/prompts/specializations/dev_mob_backend.md"
     },
     "db": {
       "label": "Base de Datos",
-      "stack": "BACK",
-      "prompt": "config/prompts/dev_db.md"
-    },
-    "ux_android": {
-      "label": "UX QA Android",
-      "stack": "MOB",
-      "prompt": "config/prompts/qa_ux_android.md"
-    },
-    "ux_ios": {
-      "label": "UX QA iOS",
-      "stack": "MOB",
-      "prompt": "config/prompts/qa_ux_ios.md"
+      "role": "developer",
+      "stack": "database",
+      "stack_key": "BACK",
+      "prompt": "config/prompts/specializations/dev_db.md"
     },
     "qa_backend": {
       "label": "QA Backend",
-      "stack": "BACK",
-      "prompt": "config/prompts/qa_back.md"
+      "role": "qa",
+      "stack": "backend",
+      "stack_key": "BACK",
+      "prompt": "config/prompts/specializations/qa_back.md"
     },
     "qa_bo": {
       "label": "QA Backoffice",
-      "stack": "BO",
-      "prompt": "config/prompts/qa_bo.md"
+      "role": "qa",
+      "stack": "front_web",
+      "stack_key": "BO",
+      "prompt": "config/prompts/specializations/qa_bo.md"
+    },
+    "qa_mob": {
+      "label": "QA Mobile",
+      "role": "qa",
+      "stack": "front_mobile",
+      "stack_key": "MOB",
+      "prompt": "config/prompts/specializations/qa_mob.md"
+    },
+    "ux_android": {
+      "label": "UX QA Android",
+      "role": "qa",
+      "stack": "front_mobile",
+      "stack_key": "MOB",
+      "prompt": "config/prompts/specializations/qa_ux_android.md"
+    },
+    "ux_ios": {
+      "label": "UX QA iOS",
+      "role": "qa",
+      "stack": "front_mobile",
+      "stack_key": "MOB",
+      "prompt": "config/prompts/specializations/qa_ux_ios.md"
     },
     "project_manager": {
       "label": "Project Manager",
-      "stack": null,
+      "role": "pm",
+      "stack": "backend",
+      "stack_key": "BACK",
       "prompt": null
     },
     "orchestrator": {
       "label": "Orchestrator",
-      "stack": null,
+      "role": "orchestrator",
+      "stack": "backend",
+      "stack_key": "BACK",
       "prompt": null
     }
   },
