@@ -1,0 +1,101 @@
+{
+  "_comment": "Fuente de verdad de modelos, costos y proveedores — leído por TokenLogger y agentes.",
+  "_updated": "2026-03-07",
+
+  "providers": {
+    "anthropic": {
+      "api_base":    "https://api.anthropic.com/v1",
+      "api_key_env": "ANTHROPIC_API_KEY"
+    },
+    "zai": {
+      "api_base":    "https://api.z.ai/api/paas/v4",
+      "api_key_env": "ZAI_API_KEY"
+    },
+    "minimax": {
+      "api_base":    "https://api.minimax.chat/v1",
+      "api_key_env": "MINIMAX_API_KEY"
+    }
+  },
+
+  "models": {
+    "claude-opus-4-6": {
+      "provider":                    "anthropic",
+      "cost_per_input_token":        15e-6,
+      "cost_per_output_token":       75e-6,
+      "cost_per_cache_read_token":   1.5e-6,
+      "cost_per_cache_write_token":  18.75e-6,
+      "context_window":              200000,
+      "description": "Ingeniero de Requerimientos (sesión interactiva)"
+    },
+    "claude-sonnet-4-6": {
+      "provider":                    "anthropic",
+      "cost_per_input_token":        3e-6,
+      "cost_per_output_token":       15e-6,
+      "cost_per_cache_read_token":   0.3e-6,
+      "cost_per_cache_write_token":  3.75e-6,
+      "context_window":              200000,
+      "description": "Alternativa Anthropic más económica"
+    },
+    "minimax-m2.5-standard": {
+      "provider":                   "minimax",
+      "cost_per_input_token":       0.30e-6,
+      "cost_per_output_token":      1.20e-6,
+      "cost_per_cache_read_token":  0.03e-6,
+      "context_window":             40000,
+      "description": "QA Agent"
+    },
+    "minimax-m2.5": {
+      "provider":                   "minimax",
+      "cost_per_input_token":       0.30e-6,
+      "cost_per_output_token":      1.20e-6,
+      "cost_per_cache_read_token":  0.03e-6,
+      "context_window":             40000,
+      "description": "Alias minimax-m2.5-standard"
+    },
+    "glm-4.7": {
+      "provider":               "zai",
+      "cost_per_input_token":   0.30e-6,
+      "cost_per_output_token":  1.40e-6,
+      "context_window":         128000,
+      "description": "QA fallback Z.AI"
+    },
+    "glm-4.7-flash": {
+      "provider":               "zai",
+      "cost_per_input_token":   0.06e-6,
+      "cost_per_output_token":  0.40e-6,
+      "context_window":         128000,
+      "description": "PM + Dev agents (gratis/muy barato en Z.AI)"
+    },
+    "glm-5": {
+      "provider":               "zai",
+      "cost_per_input_token":   0.80e-6,
+      "cost_per_output_token":  2.56e-6,
+      "context_window":         128000,
+      "supports_thinking":      true,
+      "description": "Modelo con reasoning — usar SOLO con reasoning_control"
+    },
+    "glm-4": {
+      "provider":               "zai",
+      "cost_per_input_token":   0.10e-6,
+      "cost_per_output_token":  0.10e-6,
+      "context_window":         128000,
+      "description": "Legado — reemplazado por glm-4.7-flash"
+    },
+    "glm-asr-2512": {
+      "provider":               "zai",
+      "cost_per_input_token":   0.0,
+      "cost_per_output_token":  0.0,
+      "description": "ASR — transcripción de audio, sin costo por tokens"
+    }
+  },
+
+  "agent_model_map": {
+    "PM":                   "glm-4.7-flash",
+    "Dev1":                 "glm-4.7-flash",
+    "Dev2":                 "glm-4.7-flash",
+    "Dev3":                 "glm-4.7-flash",
+    "QA":                   "minimax-m2.5-standard",
+    "Orchestrator":         "glm-4.7-flash",
+    "RequirementsEngineer": "claude-opus-4-6"
+  }
+}

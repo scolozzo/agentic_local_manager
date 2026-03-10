@@ -1,0 +1,173 @@
+{
+  "agents": [
+    {
+      "id": "pm",
+      "name": "PM Agent",
+      "type": "pm",
+      "script": "pm_integration.py",
+      "stack": "BACK",
+      "specialization": "backend",
+      "provider": "zai",
+      "model": "glm-4.7-flash",
+      "log_file": "pm.log",
+      "enabled": true,
+      "removable": false
+    },
+    {
+      "id": "orchestrator",
+      "name": "Orchestrator",
+      "type": "orchestrator",
+      "script": "orchestrator_integration.py",
+      "stack": "BACK",
+      "specialization": "orchestrator",
+      "provider": "zai",
+      "model": "glm-4.7-flash",
+      "log_file": "orchestrator.log",
+      "enabled": true,
+      "removable": false
+    },
+    {
+      "id": "dev1",
+      "name": "Dev 1",
+      "login": "botidev1",
+      "type": "dev",
+      "script": "developer_integration.py",
+      "stack": "BACK",
+      "specialization": "backend",
+      "provider": "zai",
+      "model": "glm-4.7-flash",
+      "log_file": "dev1.log",
+      "enabled": true,
+      "removable": true
+    },
+    {
+      "id": "dev2",
+      "name": "Dev 2",
+      "login": "botidev2",
+      "type": "dev",
+      "script": "developer_integration.py",
+      "stack": "BACK",
+      "specialization": "backend",
+      "provider": "zai",
+      "model": "glm-4.7-flash",
+      "log_file": "dev2.log",
+      "enabled": true,
+      "removable": true
+    },
+    {
+      "id": "dev3",
+      "name": "Dev 3",
+      "login": "botidev3",
+      "type": "dev",
+      "script": "developer_integration.py",
+      "stack": "BACK",
+      "specialization": "backend",
+      "provider": "zai",
+      "model": "glm-4.7-flash",
+      "log_file": "dev3.log",
+      "enabled": true,
+      "removable": true
+    },
+    {
+      "id": "qa",
+      "name": "QA Agent",
+      "type": "qa",
+      "script": "qa_integration.py",
+      "stack": "BACK",
+      "specialization": "qa_backend",
+      "provider": "minimax",
+      "model": "minimax-m2.5-standard",
+      "log_file": "qa.log",
+      "enabled": true,
+      "removable": false
+    }
+  ],
+  "specializations": {
+    "backend": {
+      "label": "Backend API",
+      "stack": "BACK",
+      "prompt": "config/prompts/dev_back.md"
+    },
+    "front_web": {
+      "label": "Frontend Web (BO)",
+      "stack": "BO",
+      "prompt": "config/prompts/dev_bo_frontend.md"
+    },
+    "bo_backend": {
+      "label": "BO Backend",
+      "stack": "BO",
+      "prompt": "config/prompts/dev_bo_backend.md"
+    },
+    "mob_android": {
+      "label": "Mobile Android",
+      "stack": "MOB",
+      "prompt": "config/prompts/dev_mob_android.md"
+    },
+    "mob_backend": {
+      "label": "Mobile Backend",
+      "stack": "MOB",
+      "prompt": "config/prompts/dev_mob_backend.md"
+    },
+    "db": {
+      "label": "Base de Datos",
+      "stack": "BACK",
+      "prompt": "config/prompts/dev_db.md"
+    },
+    "ux_android": {
+      "label": "UX QA Android",
+      "stack": "MOB",
+      "prompt": "config/prompts/qa_ux_android.md"
+    },
+    "ux_ios": {
+      "label": "UX QA iOS",
+      "stack": "MOB",
+      "prompt": "config/prompts/qa_ux_ios.md"
+    },
+    "qa_backend": {
+      "label": "QA Backend",
+      "stack": "BACK",
+      "prompt": "config/prompts/qa_back.md"
+    },
+    "qa_bo": {
+      "label": "QA Backoffice",
+      "stack": "BO",
+      "prompt": "config/prompts/qa_bo.md"
+    },
+    "project_manager": {
+      "label": "Project Manager",
+      "stack": null,
+      "prompt": null
+    },
+    "orchestrator": {
+      "label": "Orchestrator",
+      "stack": null,
+      "prompt": null
+    }
+  },
+  "providers": {
+    "zai": {
+      "label": "Z.AI (GLM)",
+      "env_key": "ZAI_API_KEY",
+      "models": [
+        "glm-4.7-flash",
+        "glm-4.7"
+      ]
+    },
+    "minimax": {
+      "label": "MiniMax",
+      "env_key": "MINIMAX_API_KEY",
+      "models": [
+        "minimax-m2.5-standard"
+      ]
+    },
+    "openai": {
+      "label": "OpenAI (Codex)",
+      "env_key": "OPENAI_API_KEY",
+      "models": [
+        "gpt-4.1",
+        "o4-mini",
+        "codex-5.3"
+      ]
+    }
+  }
+}

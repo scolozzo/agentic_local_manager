@@ -1,0 +1,20 @@
+{
+  "BACK": {
+    "project_id": "",
+    "url": "",
+    "develop_branch": "develop",
+    "description": "FastAPI · PostgreSQL backend"
+  },
+  "BO": {
+    "project_id": "",
+    "url": "",
+    "develop_branch": "develop",
+    "description": "Next.js · shadcn/ui backoffice"
+  },
+  "MOB": {
+    "project_id": "",
+    "url": "",
+    "develop_branch": "develop",
+    "description": "Android · Compose mobile"
+  }
+}

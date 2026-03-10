@@ -1,0 +1,66 @@
+{
+  "sprint_id": "sprint_01",
+  "sprint_number": 1,
+  "stack": "BACK",
+  "started_at": "2026-03-07",
+  "capacity": 20,
+  "agents": {
+    "dev_1": {
+      "role": "data_domain",
+      "repo": "",
+      "base_branch": "main",
+      "work_branch_prefix": "feature/sprint01-back",
+      "system_prompt": "config/prompts/dev_back.md",
+      "model": "glm-4.7-flash",
+      "active": true
+    },
+    "dev_2": {
+      "role": "auth_security",
+      "repo": "",
+      "base_branch": "main",
+      "work_branch_prefix": "feature/sprint01-back",
+      "system_prompt": "config/prompts/dev_back.md",
+      "model": "glm-4.7-flash",
+      "active": true
+    },
+    "dev_3": {
+      "role": "api_architecture",
+      "repo": "",
+      "base_branch": "main",
+      "work_branch_prefix": "feature/sprint01-back",
+      "system_prompt": "config/prompts/dev_back.md",
+      "model": "glm-4.7-flash",
+      "active": true
+    },
+    "qa": {
+      "repos": ["veloxiq-backend"],
+      "system_prompt": "config/prompts/qa_back.md",
+      "model": "minimax-m2.5-standard",
+      "smoke_test_certified": false,
+      "active": true
+    },
+    "orchestrator": {
+      "model": "glm-4.7-flash",
+      "active": true
+    },
+    "pm": {
+      "model": "glm-4.7-flash",
+      "active": true
+    }
+  },
+  "youtrack": {
+    "project": "VEL",
+    "sprint_board": "Sprint 1 — BACK",
+    "dependency_check": []
+  },
+  "dependency_rules": {
+    "BACK": [],
+    "BO":   ["BACK:auth", "BACK:openapi-spec"],
+    "MOB":  ["BACK:shared-stable"]
+  },
+  "alerts": {
+    "cost_per_task_usd": 0.10,
+    "max_retries_per_task": 3,
+    "notify_telegram_on_block": true
+  }
+}
