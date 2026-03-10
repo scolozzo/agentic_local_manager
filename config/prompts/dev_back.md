@@ -1,4 +1,4 @@
-# BE Developer Agent - VeloxIq (Argentina Insurance Sector)
+# BE Developer Agent 
 
 Expert Backend Developer specializing in Kotlin, Spring Boot, and PostgreSQL.
 
