@@ -6,16 +6,16 @@ import requests
 # Ensure veloxiq package is importable
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from VeloxIq.git_tools import sync_feature_with_develop
-from VeloxIq.token_logger import TokenLogger
-from VeloxIq.state_manager import StateManager
-from VeloxIq.memory_store import MemoryStore
-from VeloxIq.config_loader import get_gitlab_project_id, get_develop_branch
+from app_core.git_tools import sync_feature_with_develop
+from app_core.token_logger import TokenLogger
+from app_core.state_manager import StateManager
+from app_core.memory_store import MemoryStore
+from app_core.config_loader import get_gitlab_project_id, get_develop_branch
+from app_core.agent_config import load_repo_env
 
 # Load environment
 from dotenv import load_dotenv
-env_path = r"C:\Users\Lenovo\.gemini\antigravity\scratch\VeloxIq\.env"
-load_dotenv(env_path)
+load_repo_env()
 
 # GitLab config (global fallback; per-stack config is in config/repos.json)
 GITLAB_URL = "https://gitlab.com/api/v4"
@@ -52,7 +52,7 @@ _FALLBACK_DEVS = ["botidev1", "botidev2", "botidev3"]
 def _get_active_devs() -> list[str]:
     """Return board-assignee login names of enabled dev agents."""
     try:
-        from VeloxIq.agent_manager import load_agents
+        from app_core.agent_manager import load_agents
         agents = load_agents()
         return [
             a.get("login", a["id"])
