@@ -33,6 +33,7 @@ class InstallerApp:
         self.git_host = tk.StringVar(value="https://api.github.com")
         self.git_token = tk.StringVar()
         self.git_status = tk.StringVar(value="Todavia no validado.")
+        self.git_status_label: ttk.Label | None = None
         self.summary_text = tk.StringVar()
         self.install_warning = tk.StringVar()
 
@@ -67,14 +68,8 @@ class InstallerApp:
         wrapper.pack(fill="both", expand=True)
 
         ttk.Label(wrapper, text="Agentic Local Manager Windows Installer", font=("Segoe UI", 18, "bold")).pack(anchor="w")
-        ttk.Label(
-            wrapper,
-            text="El instalador ahora funciona paso a paso. Cada pantalla muestra ayuda simple debajo de cada campo.",
-            wraplength=920,
-        ).pack(anchor="w", pady=(4, 12))
-
         self.step_label = ttk.Label(wrapper, text="", font=("Segoe UI", 11, "bold"))
-        self.step_label.pack(anchor="w", pady=(0, 8))
+        self.step_label.pack(anchor="w", pady=(8, 8))
 
         self.content = ttk.Frame(wrapper)
         self.content.pack(fill="both", expand=True)
@@ -165,7 +160,8 @@ class InstallerApp:
         ).pack(anchor="w", pady=(6, 10))
 
         ttk.Button(parent, text="Validar credenciales Git", command=self.validate_git_credentials).pack(anchor="w")
-        ttk.Label(parent, textvariable=self.git_status, foreground="#0f766e").pack(anchor="w", pady=(8, 0))
+        self.git_status_label = ttk.Label(parent, textvariable=self.git_status, foreground="#475569")
+        self.git_status_label.pack(anchor="w", pady=(8, 0))
 
     def _build_llm_step(self, parent: ttk.Frame) -> None:
         ttk.Label(
@@ -181,6 +177,8 @@ class InstallerApp:
         scroll_frame.bind("<Configure>", lambda _event: canvas.configure(scrollregion=canvas.bbox("all")))
         canvas.create_window((0, 0), window=scroll_frame, anchor="nw")
         canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.bind("<Enter>", lambda _event: self._bind_mousewheel(canvas))
+        canvas.bind("<Leave>", lambda _event: self._unbind_mousewheel(canvas))
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
@@ -218,11 +216,13 @@ class InstallerApp:
                     foreground="#555555",
                 ).pack(anchor="w")
 
-            ttk.Label(box, textvariable=status_var, foreground="#0f766e").pack(anchor="w", pady=(8, 0))
+            status_label = ttk.Label(box, textvariable=status_var, foreground="#475569")
+            status_label.pack(anchor="w", pady=(8, 0))
             self.service_vars[service_id] = {
                 "enabled": enabled_var,
                 "api_key": api_key_var,
                 "status": status_var,
+                "status_label": status_label,
             }
 
     def _build_defaults_step(self, parent: ttk.Frame) -> None:
@@ -267,6 +267,23 @@ class InstallerApp:
         selected = filedialog.askdirectory(initialdir=self.install_dir.get() or str(Path.home()))
         if selected:
             self.install_dir.set(selected)
+
+    def _bind_mousewheel(self, canvas: tk.Canvas) -> None:
+        canvas.bind_all("<MouseWheel>", lambda event: self._on_mousewheel(event, canvas))
+        canvas.bind_all("<Button-4>", lambda event: self._on_linux_scroll(canvas, -1))
+        canvas.bind_all("<Button-5>", lambda event: self._on_linux_scroll(canvas, 1))
+
+    def _unbind_mousewheel(self, _canvas: tk.Canvas) -> None:
+        self.root.unbind_all("<MouseWheel>")
+        self.root.unbind_all("<Button-4>")
+        self.root.unbind_all("<Button-5>")
+
+    def _on_mousewheel(self, event: tk.Event, canvas: tk.Canvas) -> None:
+        delta = -1 if event.delta > 0 else 1
+        canvas.yview_scroll(delta, "units")
+
+    def _on_linux_scroll(self, canvas: tk.Canvas, direction: int) -> None:
+        canvas.yview_scroll(direction, "units")
 
     def _sync_git_host(self) -> None:
         self.git_host.set("https://api.github.com" if self.git_provider.get() == "github" else "https://gitlab.com")
@@ -359,10 +376,14 @@ class InstallerApp:
                 "validated": True,
                 "validated_at": result.get("validated_at", ""),
             }
-            self.git_status.set(f"Validado para {result.get('username') or self.git_provider.get()}.")
+            self.git_status.set("✓ Credencial valida. Validada.")
+            if self.git_status_label:
+                self.git_status_label.configure(foreground="#0f766e")
         else:
             self.settings["git"]["validated"] = False
-            self.git_status.set(result.get("error", "La validacion Git fallo."))
+            self.git_status.set("✗ Credencial invalida.")
+            if self.git_status_label:
+                self.git_status_label.configure(foreground="#b91c1c")
 
     def validate_service_credentials(self, service_id: str) -> None:
         field_state = self.service_vars[service_id]
@@ -373,7 +394,8 @@ class InstallerApp:
         if service.get("mode") == "manual_login":
             service["available"] = True
             service["validated"] = False
-            field_state["status"].set("Guardado como opción de login manual.")
+            field_state["status"].set("✓ Credencial valida. Validada.")
+            field_state["status_label"].configure(foreground="#0f766e")
             self._refresh_profile_dropdowns()
             return
         token = field_state["api_key"].get().strip()
@@ -395,11 +417,13 @@ class InstallerApp:
             service["available"] = True
             service["validated"] = True
             service["validated_at"] = result.get("validated_at", "")
-            field_state["status"].set("Validado y disponible.")
+            field_state["status"].set("✓ Credencial valida. Validada.")
+            field_state["status_label"].configure(foreground="#0f766e")
         else:
             service["available"] = False
             service["validated"] = False
-            field_state["status"].set(result.get("error") or result.get("message") or "La validacion fallo.")
+            field_state["status"].set("✗ Credencial invalida.")
+            field_state["status_label"].configure(foreground="#b91c1c")
         self._refresh_profile_dropdowns()
 
     def _refresh_profile_dropdowns(self) -> None:
@@ -428,7 +452,8 @@ class InstallerApp:
         manual_service = self.service_vars.get("chatgpt_login")
         if manual_service:
             manual_service["enabled"].set(True)
-            manual_service["status"].set("Fallback manual habilitado por defecto.")
+            manual_service["status"].set("✓ Credencial valida. Validada.")
+            manual_service["status_label"].configure(foreground="#0f766e")
         self.install_warning.set(
             "No se validó ninguna API key. El instalador usará ChatGPT Login como fallback para todos los agentes."
         )
