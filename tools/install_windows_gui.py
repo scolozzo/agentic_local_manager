@@ -8,6 +8,7 @@ from tkinter import filedialog, messagebox, ttk
 
 from install_support import (
     GIT_TOKEN_ENV,
+    LAUNCHER_FILENAME,
     SOURCE_ROOT,
     available_profiles,
     build_default_settings,
@@ -16,6 +17,7 @@ from install_support import (
     ensure_manual_login_fallback,
     validate_git,
     validate_service,
+    write_launcher_script,
     write_env,
     write_json,
 )
@@ -36,6 +38,8 @@ class InstallerApp:
         self.git_status_label: ttk.Label | None = None
         self.summary_text = tk.StringVar()
         self.install_warning = tk.StringVar()
+        self.launch_after_install = tk.BooleanVar(value=True)
+        self.auto_fallback_active = False
 
         self.service_vars: dict[str, dict] = {}
         self.role_default_vars = {
@@ -261,6 +265,7 @@ class InstallerApp:
             foreground="#555555",
         ).pack(anchor="w", pady=(6, 12))
         ttk.Label(parent, textvariable=self.summary_text, justify="left", wraplength=860).pack(anchor="w")
+        ttk.Checkbutton(parent, text="Lanzar el sistema al finalizar", variable=self.launch_after_install).pack(anchor="w", pady=(12, 4))
         ttk.Label(parent, textvariable=self.install_warning, justify="left", wraplength=860, foreground="#b45309").pack(anchor="w", pady=(12, 0))
 
     def _browse_install_dir(self) -> None:
@@ -286,7 +291,7 @@ class InstallerApp:
         canvas.yview_scroll(direction, "units")
 
     def _sync_git_host(self) -> None:
-        self.git_host.set("https://api.github.com" if self.git_provider.get() == "github" else "https://gitlab.com")
+        self.git_host.set("https://api.github.com" if self.git_provider.get() == "github" else "https://gitlab.com/api/v4")
 
     def _service_help_text(self, service_id: str, service: dict) -> str:
         lookup = {
@@ -427,11 +432,12 @@ class InstallerApp:
         self._refresh_profile_dropdowns()
 
     def _refresh_profile_dropdowns(self) -> None:
+        self.auto_fallback_active = False
         for service_id, service in self.settings["llm_services"].items():
             field_state = self.service_vars.get(service_id)
             if service.get("mode") == "manual_login" and field_state and field_state["enabled"].get():
                 service["available"] = True
-        profiles = available_profiles(self.settings, include_manual=False)
+        profiles = available_profiles(self.settings, include_manual=True)
         self.profile_labels = [item["label"] for item in profiles]
         self.profile_index_by_label = {item["label"]: item["id"] for item in profiles}
         for key, combo in self.role_boxes.items():
@@ -448,12 +454,15 @@ class InstallerApp:
         self._refresh_profile_dropdowns()
         if self.profile_labels:
             return
+        self.auto_fallback_active = True
         ensure_manual_login_fallback(self.settings)
         manual_service = self.service_vars.get("chatgpt_login")
         if manual_service:
             manual_service["enabled"].set(True)
             manual_service["status"].set("✓ Credencial valida. Validada.")
             manual_service["status_label"].configure(foreground="#0f766e")
+        self.profile_labels = []
+        self.profile_index_by_label = {}
         self.install_warning.set(
             "No se validó ninguna API key. El instalador usará ChatGPT Login como fallback para todos los agentes."
         )
@@ -505,17 +514,26 @@ class InstallerApp:
         def worker() -> None:
             try:
                 copy_repo(SOURCE_ROOT, target_root, overwrite=overwrite)
+                launcher_path = write_launcher_script(target_root)
                 write_json(target_root / "config" / "system_settings.json", settings)
                 write_env(target_root / ".env", env_values)
-                shortcut_warning = create_desktop_shortcut(target_root / "Iniciar_Agentic_Manager.cmd", target_root)
-                message = f"Instalación completada en:\n{target_root}"
-                if shortcut_warning:
-                    message += f"\n\nNo se pudo crear el acceso directo automáticamente:\n{shortcut_warning}"
-                self.root.after(0, lambda: messagebox.showinfo("Instalacion", message))
+                shortcut_warning = create_desktop_shortcut(launcher_path, target_root)
+                self.root.after(0, lambda: self._finish_install(target_root, launcher_path, shortcut_warning))
             except Exception as exc:
                 self.root.after(0, lambda: messagebox.showerror("Instalacion", str(exc)))
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def _finish_install(self, target_root: Path, launcher_path: Path, shortcut_warning: str | None) -> None:
+        message = f"Instalación completada en:\n{target_root}"
+        if shortcut_warning:
+            message += f"\n\nNo se pudo crear el acceso directo automáticamente:\n{shortcut_warning}"
+        messagebox.showinfo("Instalacion", message)
+        if self.launch_after_install.get():
+            import subprocess
+
+            subprocess.Popen(["cmd", "/c", str(launcher_path)], cwd=str(target_root))
+        self.root.destroy()
 
 
 def main() -> int:

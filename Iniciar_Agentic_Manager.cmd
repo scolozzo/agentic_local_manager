@@ -29,6 +29,9 @@ if not defined PYTHON_EXE (
   exit /b 1
 )
 
+"%PYTHON_EXE%" %PYTHON_ARGS% tools\startup_checks.py
+if errorlevel 1 exit /b 1
+
 call :check_dashboard
 if errorlevel 1 (
   echo Iniciando dashboard en %DASHBOARD_URL% ...
