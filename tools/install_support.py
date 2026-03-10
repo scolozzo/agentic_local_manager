@@ -4,12 +4,16 @@ import json
 import shutil
 import subprocess
 from pathlib import Path
+import sys
+
+
+SOURCE_ROOT = Path(__file__).resolve().parent.parent
+if str(SOURCE_ROOT) not in sys.path:
+    sys.path.insert(0, str(SOURCE_ROOT))
 
 from app_core.provider_validation import validate_git_credentials, validate_llm_service
 from app_core.system_settings import DEFAULT_SYSTEM_SETTINGS
 
-
-SOURCE_ROOT = Path(__file__).resolve().parent.parent
 SKIP_NAMES = {
     ".git",
     ".pytest_cache",
