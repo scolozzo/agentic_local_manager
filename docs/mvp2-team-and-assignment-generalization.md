@@ -127,3 +127,19 @@ Cada plantilla debe definir:
 - soporte para QA por stack
 - plantillas de equipo activables
 - asignacion actual preservada como comportamiento por defecto
+
+## Estado actual
+
+Estado: `completado`
+
+Quedo incorporado en `develop` con:
+
+- `LocalBoardDefaultAssignmentPolicy` como baseline operativa
+- elegibilidad configurable por `role + stack + enabled`
+- presets/equipos reutilizables en `config/agent_presets.json`
+- dashboard mostrando elegibilidad y activacion por stack
+
+Nota de evolucion posterior:
+
+- el cambio manual de equipo global fue reemplazado por equipo derivado del sprint activo
+- los equipos siguen siendo reutilizables, pero ahora se asignan al crear cada sprint

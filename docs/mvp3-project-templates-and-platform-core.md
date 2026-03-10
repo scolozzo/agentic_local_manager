@@ -132,3 +132,22 @@ Cada template define:
 - templates iniciales versionados
 - workflow actual representado como template principal
 - base lista para extender a otros tipos de proyecto por configuracion
+
+## Estado actual
+
+Estado: `completado`
+
+Quedo incorporado en `develop` con:
+
+- `config/project_templates.json` como catalogo versionado
+- `app_core/project_templates.py` y `app_core/project_context.py`
+- validacion de configuracion de proyecto por familias de repositorio
+- dashboard con selector de proyecto y template
+- persistencia de `template_id` y `project_id` en el storage local
+- tablero filtrado por proyecto
+
+Extension agregada despues del cierre base de MVP 3:
+
+- runtime state por proyecto con restore del ultimo sprint
+- sprint asociado a `project_id + team_id + substack`
+- equipos reutilizables por stack/substack desacoplados del proyecto

@@ -79,8 +79,9 @@ python qa_integration.py &
 ### Projects & Stack Management
 Via Dashboard Configuration Tab:
 - Create new projects for different initiatives
-- Configure repository directories per technology stack
-- Set project directives (branching strategy, naming conventions, integration branch)
+- Configure repository directories per project
+- Persist and restore project context when switching between projects
+- Keep API keys in environment variables and repositories in per-project config
 
 ### Create a Sprint
 Via Dashboard Sprint Creator:
@@ -88,7 +89,10 @@ Via Dashboard Sprint Creator:
 {
   "sprint_id": "sprint_01",
   "name": "Feature: User Authentication",
-  "stack": "backend",
+  "project_id": "ACME",
+  "stack": "BACK",
+  "substack": "api",
+  "team_id": "backend_only_team",
   "tasks": [
     {
       "id": "TASK-1",
@@ -120,8 +124,9 @@ Or via Telegram Bot:
 - **state_manager.py** - Centralized task state transitions with automatic retries and deadlock detection
 - **sprint_manager.py** - Sprint planning and parsing (JSON/Markdown formats)
 - **status_router.py** - Query system for task status without LLM overhead
-- **project_manager.py** - Multi-project lifecycle and configuration management
-- **dependency_graph.py** - Task dependency validation and resolution
+- **project_context.py** - Active project resolution and runtime persistence
+- **project_templates.py** - Template catalog and workflow mapping
+- **project_validation.py** - Project repo validation by stack family
 
 ### Agent Coordination
 - **agent_manager.py** - Agent lifecycle management (start, stop, configuration)
@@ -149,14 +154,17 @@ Or via Telegram Bot:
 ### Main Tables
 ```sql
 -- Projects
-projects(project_id, name, description, git_dirs, directives, created_at, updated_at)
+projects(project_id, name, description, template_id, git_dirs, directives, created_at, updated_at)
 
 -- Tasks (local board)
 local_board(task_id, summary, description, state, assignee, priority, stack,
             sprint_id, acceptance_criteria, depends_on, parallel, created_at, updated_at)
 
 -- Sprints
-sprints(sprint_id, name, stack, status, created_at, started_at, ended_at)
+sprints(sprint_id, name, stack, project_id, team_id, substack, team_snapshot, status, created_at, started_at, ended_at)
+
+-- Project runtime state
+project_runtime_state(project_id, last_sprint_id, context_json, updated_at)
 
 -- Audit Trail
 state_transitions(id, task_id, from_state, to_state, agent_id, attempt_num,
@@ -309,17 +317,17 @@ reasoning_control.set_thinking_enabled("dev1", "feature", enable=True)
 reasoning_control.set_thinking_enabled("qa", "acceptance-check", enable=False)
 ```
 
-## 🏗️ Multi-Stack Project Management
+## 🏗️ Multi-Project And Team Management
 
-Configure agents for different technology stacks:
+The current `develop` branch supports:
 
-Each stack can have specialized development and QA agents:
-- **Backend**: Server-side logic, databases, APIs
-- **Frontend**: User interface, web applications, responsive design
-- **Mobile**: Native applications, platform-specific features
-- **Infrastructure**: DevOps, deployment, monitoring
+- project-specific repository configuration
+- reusable project templates
+- sprint creation bound to `project + stack/substack + reusable team`
+- reusable teams and skills across all projects
+- developer creation limited to skills allowed by the sprint team
 
-Agents learn stack-specific best practices through system prompts and configuration.
+Agents keep their reusable skills globally; projects only contribute runtime context and repository configuration.
 
 ## 📈 Performance Metrics
 
@@ -363,10 +371,10 @@ This project is provided as-is for local project management use.
 
 ## 🚀 Implementation Status
 
-**Phase 1** ✅ Multi-agent foundation (orchestration, task management, state handling)
-**Phase 2** ✅ User interface (dashboard, web API, notification integration)
-**Phase 3** ✅ Workflow optimization (context compilation, deadlock detection, retry logic)
-**Phase 4** 🔄 Production hardening (authentication, monitoring, multi-tenancy)
+**MVP 1** ✅ Prompt cleanup and stack-specialized agents
+**MVP 2** ✅ Team presets and assignment generalization
+**MVP 3** ✅ Project templates and platform core
+**Manager Feature Set** ✅ Sprint-bound reusable teams, project runtime restore, developer-skill locking
 
 ---
 

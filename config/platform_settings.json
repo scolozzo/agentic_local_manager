@@ -1,0 +1,20 @@
+{
+  "coding_rules": [
+    "Preservar patrones existentes del repositorio antes de introducir nuevos.",
+    "Mantener cambios pequenos, enfocados y compatibles hacia atras.",
+    "Agregar pruebas o validaciones cuando el cambio afecte comportamiento.",
+    "Evitar comentarios innecesarios y codigo muerto."
+  ],
+  "git_rules": [
+    "Trabajar sobre ramas de feature y fusionar a develop cuando la validacion pase.",
+    "No reescribir historia compartida ni usar comandos destructivos sobre trabajo ajeno.",
+    "Usar nombres de ramas y commits claros y orientados a la funcionalidad.",
+    "Respetar el flujo feature -> develop -> release definido por la plataforma."
+  ],
+  "token_optimization_rules": [
+    "Minimizar contexto redundante en prompts y llamadas LLM.",
+    "Preferir rutas locales, status router y cache antes de escalar a LLM.",
+    "Usar solo el contexto de proyecto, sprint y task estrictamente necesario.",
+    "Evitar llamadas repetidas con la misma informacion si ya existe estado local."
+  ]
+}

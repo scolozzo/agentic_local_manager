@@ -4,6 +4,16 @@
   "presets": {
     "default_software_team": {
       "label": "Default Software Team",
+      "stack_key": "BACK",
+      "substacks": [
+        "api",
+        "db"
+      ],
+      "skills": [
+        "backend",
+        "db",
+        "qa_backend"
+      ],
       "agents": [
         "pm",
         "orchestrator",
@@ -46,6 +56,16 @@
     },
     "backend_only_team": {
       "label": "Backend Only Team",
+      "stack_key": "BACK",
+      "substacks": [
+        "api",
+        "db"
+      ],
+      "skills": [
+        "backend",
+        "db",
+        "qa_backend"
+      ],
       "supported_stacks": [
         "BACK"
       ],
@@ -76,6 +96,16 @@
     },
     "web_team": {
       "label": "Web Team",
+      "stack_key": "BO",
+      "substacks": [
+        "backoffice",
+        "landing"
+      ],
+      "skills": [
+        "front_web",
+        "bo_backend",
+        "qa_bo"
+      ],
       "supported_stacks": [
         "BO"
       ],
@@ -106,6 +136,215 @@
     },
     "mobile_team": {
       "label": "Mobile Team",
+      "stack_key": "MOB",
+      "substacks": [
+        "android",
+        "ios",
+        "flutter"
+      ],
+      "skills": [
+        "mob_android",
+        "mob_backend",
+        "qa_mob",
+        "ux_android",
+        "ux_ios"
+      ],
+      "supported_stacks": [
+        "MOB"
+      ],
+      "eligibility": [
+        {
+          "roles": [
+            "pm",
+            "orchestrator"
+          ],
+          "stacks": [
+            "*"
+          ]
+        },
+        {
+          "roles": [
+            "developer",
+            "qa"
+          ],
+          "stacks": [
+            "MOB"
+          ]
+        }
+      ],
+      "suggested_counts": {
+        "developer": 2,
+        "qa": 1
+      }
+    },
+    "web_backoffice_team": {
+      "label": "Web Backoffice Team",
+      "stack_key": "BO",
+      "substacks": [
+        "backoffice"
+      ],
+      "skills": [
+        "front_web",
+        "bo_backend",
+        "qa_bo"
+      ],
+      "supported_stacks": [
+        "BO"
+      ],
+      "eligibility": [
+        {
+          "roles": [
+            "pm",
+            "orchestrator"
+          ],
+          "stacks": [
+            "*"
+          ]
+        },
+        {
+          "roles": [
+            "developer",
+            "qa"
+          ],
+          "stacks": [
+            "BO"
+          ]
+        }
+      ],
+      "suggested_counts": {
+        "developer": 2,
+        "qa": 1
+      }
+    },
+    "web_landing_team": {
+      "label": "Web Landing Team",
+      "stack_key": "BO",
+      "substacks": [
+        "landing"
+      ],
+      "skills": [
+        "front_web",
+        "qa_bo"
+      ],
+      "supported_stacks": [
+        "BO"
+      ],
+      "eligibility": [
+        {
+          "roles": [
+            "pm",
+            "orchestrator"
+          ],
+          "stacks": [
+            "*"
+          ]
+        },
+        {
+          "roles": [
+            "developer",
+            "qa"
+          ],
+          "stacks": [
+            "BO"
+          ]
+        }
+      ],
+      "suggested_counts": {
+        "developer": 2,
+        "qa": 1
+      }
+    },
+    "mobile_android_team": {
+      "label": "Mobile Android Team",
+      "stack_key": "MOB",
+      "substacks": [
+        "android"
+      ],
+      "skills": [
+        "mob_android",
+        "mob_backend",
+        "qa_mob",
+        "ux_android"
+      ],
+      "supported_stacks": [
+        "MOB"
+      ],
+      "eligibility": [
+        {
+          "roles": [
+            "pm",
+            "orchestrator"
+          ],
+          "stacks": [
+            "*"
+          ]
+        },
+        {
+          "roles": [
+            "developer",
+            "qa"
+          ],
+          "stacks": [
+            "MOB"
+          ]
+        }
+      ],
+      "suggested_counts": {
+        "developer": 2,
+        "qa": 1
+      }
+    },
+    "mobile_ios_team": {
+      "label": "Mobile iOS Team",
+      "stack_key": "MOB",
+      "substacks": [
+        "ios"
+      ],
+      "skills": [
+        "mob_android",
+        "mob_backend",
+        "qa_mob",
+        "ux_ios"
+      ],
+      "supported_stacks": [
+        "MOB"
+      ],
+      "eligibility": [
+        {
+          "roles": [
+            "pm",
+            "orchestrator"
+          ],
+          "stacks": [
+            "*"
+          ]
+        },
+        {
+          "roles": [
+            "developer",
+            "qa"
+          ],
+          "stacks": [
+            "MOB"
+          ]
+        }
+      ],
+      "suggested_counts": {
+        "developer": 2,
+        "qa": 1
+      }
+    },
+    "mobile_flutter_team": {
+      "label": "Mobile Flutter Team",
+      "stack_key": "MOB",
+      "substacks": [
+        "flutter"
+      ],
+      "skills": [
+        "mob_android",
+        "mob_backend",
+        "qa_mob"
+      ],
       "supported_stacks": [
         "MOB"
       ],

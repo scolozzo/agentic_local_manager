@@ -46,6 +46,31 @@ Documento detallado: `docs/mvp3-project-templates-and-platform-core.md`
 2. Ejecutar MVP 2 y validar que la asignacion siga replicando el comportamiento actual.
 3. Ejecutar MVP 3 solo cuando MVP 1 y MVP 2 queden estables.
 
+## Estado actual
+
+Actualizado al `2026-03-10`.
+
+- `MVP 1` completado y fusionado en `develop`
+- `MVP 2` completado y fusionado en `develop`
+- `MVP 3` completado en su base de templates/contexto y fusionado en `develop`
+- feature adicional de manager fusionada en `develop`:
+  - proyecto activo persistente con restore por proyecto
+  - sprint obligatorio asociado a proyecto
+  - sprint obligatorio asociado a equipo reusable
+  - equipos reutilizables por `stack/substack`
+  - skills reutilizables por equipo
+  - restriccion de alta de devs segun skills del equipo activo
+  - bloqueo de borrado para devs ya asociados al equipo del sprint
+
+## Estado del sistema en `develop`
+
+- prompts por rol, stack y especializacion ya separados
+- politica de asignacion encapsulada
+- presets/equipos reutilizables disponibles
+- templates de proyecto versionados disponibles
+- dashboard con seleccion de proyecto, creacion de proyecto y creacion de sprint con equipo
+- persistencia local de contexto por proyecto y ultimo sprint seleccionado
+
 ## Entregable esperado al final de los 3 MVP
 
 - prompts base por rol limpios y reutilizables
