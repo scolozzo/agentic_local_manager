@@ -70,9 +70,9 @@ DEFAULT_SYSTEM_SETTINGS = {
             "mode": "api",
             "available": False,
             "validated": False,
-            "base_url": "https://api.minimax.chat/v1",
+            "base_url": "https://api.minimax.io/v1",
             "api_key_env": "MINIMAX_API_KEY",
-            "models": ["minimax-m2.5-standard"],
+            "models": ["MiniMax-M2.5"],
         },
     },
     "role_defaults": {

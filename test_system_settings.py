@@ -43,3 +43,9 @@ def test_upsert_env_vars_persists_values(tmp_path):
     finally:
         system_settings_module.SETTINGS_FILE = original_settings_file
         system_settings_module.ENV_FILE = original_env_file
+
+
+def test_minimax_defaults_match_current_openai_compatible_endpoint():
+    service = system_settings_module.DEFAULT_SYSTEM_SETTINGS["llm_services"]["minimax_api"]
+    assert service["base_url"] == "https://api.minimax.io/v1"
+    assert service["models"] == ["MiniMax-M2.5"]
