@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -109,13 +110,32 @@ def ensure_manual_login_fallback(settings: dict) -> str:
 
 
 def write_json(path: Path, payload: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    _prepare_path_for_write(path)
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
 def write_env(path: Path, values: dict[str, str]) -> None:
+    _prepare_path_for_write(path)
     lines = [f"{key}={value}" for key, value in sorted(values.items()) if value]
     path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+
+
+def _prepare_path_for_write(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        try:
+            os.chmod(path, 0o666)
+        except OSError:
+            pass
+        try:
+            subprocess.run(
+                ["attrib", "-r", "-h", "-s", str(path)],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        except OSError:
+            pass
 
 
 def create_desktop_shortcut(launcher_path: Path, working_dir: Path) -> str | None:
