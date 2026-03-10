@@ -46,6 +46,7 @@ memory/*.db
 tmp_audio_*.ogg
 *.tmp
 .pytest_cache/
+tmp/
 
 # Node modules (if applicable)
 node_modules/
