@@ -16,7 +16,9 @@ sys.path.insert(0, str(Path(__file__).parent))
 from app_core.agent_manager import (
     load_agents, load_specializations, get_log, get_current_task,
     get_agent, start_agent, stop_agent, start_all, stop_all, is_running,
-    add_agent, remove_agent, system_running,
+    add_agent, remove_agent, system_running, get_team_status,
+    get_agents_with_eligibility, set_active_preset, set_agents_enabled_for_stack,
+    set_agent_enabled,
     get_schedule, save_schedule, start_scheduler,
 )
 from app_core.alert_manager import get_active_alerts, clear_alert
@@ -103,7 +105,7 @@ def get_local_board_data(sprint_id: str = "") -> dict:
     stacks  = {k: {"total": 0, "verified": 0, "by_state": {}} for k in ["BACK", "BO", "MOB"]}
     parsed  = []
     sprints = []
-    active_sprint = {"name": "Sprint Local", "sprint_id": ""}
+    active_sprint = {"name": "Sprint Local", "sprint_id": "", "stack": ""}
 
     if db.exists():
         try:
@@ -116,7 +118,7 @@ def get_local_board_data(sprint_id: str = "") -> dict:
             for sr in sprint_rows:
                 sprints.append({"sprint_id": sr[0], "name": sr[1], "stack": sr[2], "status": sr[3]})
                 if sr[3] == "active" and not sprint_id:
-                    active_sprint = {"name": sr[1], "sprint_id": sr[0]}
+                    active_sprint = {"name": sr[1], "sprint_id": sr[0], "stack": sr[2]}
 
             # Load tasks filtered by sprint
             if sprint_id:
@@ -127,7 +129,7 @@ def get_local_board_data(sprint_id: str = "") -> dict:
                 # Sprint name for selected sprint
                 for sr in sprints:
                     if sr["sprint_id"] == sprint_id:
-                        active_sprint = {"name": sr["name"], "sprint_id": sprint_id}
+                        active_sprint = {"name": sr["name"], "sprint_id": sprint_id, "stack": sr["stack"]}
             else:
                 rows = con.execute(
                     "SELECT task_id, summary, state, stack, priority, depends_on, parallel, sprint_id "
@@ -174,12 +176,17 @@ def get_local_board_data(sprint_id: str = "") -> dict:
 
 # ── Build data ─────────────────────────────────────────────────────────────────
 def build_data(sprint_id: str = "") -> dict:
-    agents_cfg = load_agents()
     yt         = get_local_board_data(sprint_id)
     tc         = local_token_stats()
     endpoints  = local_certified_endpoints()
     schedule   = get_schedule()
     providers  = json.loads((BASE_DIR/"config"/"agents.json").read_text())["providers"]
+    active_stack = (yt.get("active_sprint") or {}).get("stack", "")
+    team_status = get_team_status()
+    agents_cfg = get_agents_with_eligibility(
+        stack_key=active_stack or None,
+        preset_name=team_status["active_preset"],
+    )
 
     agents_out = []
     for a in agents_cfg:
@@ -195,7 +202,7 @@ def build_data(sprint_id: str = "") -> dict:
             "schedule":schedule,"sys_running":system_running(),
             "updated_at":datetime.now().strftime("%H:%M:%S"),
             "specs":load_specializations(),"providers":providers,
-            "alerts":alerts}
+            "alerts":alerts,"team":team_status,"active_stack":active_stack}
 
 # ── Abrir terminal PowerShell con tail del log del agente ─────────────────────
 def open_terminal(agent_id: str) -> dict:
@@ -228,6 +235,8 @@ def render(data: dict) -> str:
     sched   = data["schedule"]
     specs   = data["specs"]
     provs   = data["providers"]
+    team    = data["team"]
+    active_stack = data.get("active_stack") or ""
 
     def pct(s): return int(s["verified"]/s["total"]*100) if s["total"] else 0
     def badges(by_state):
@@ -263,6 +272,9 @@ def render(data: dict) -> str:
         btn_lbl  = "Detener" if running else "Iniciar"
         rm_btn   = f'<button class="btn btn-outline btn-sm" onclick="event.stopPropagation();removeAgent(\'{a["id"]}\')">&#x2715;</button>' if a.get("removable") else ""
         dot_cls  = ("dot-idle" if idle else "dot-on") if running else "dot-off"
+        eligibility = a.get("eligibility", {})
+        elig_color = "#10b981" if eligibility.get("eligible") else "#ef4444"
+        elig_text = ", ".join(eligibility.get("reasons", []))
         # Status badge
         if not running:
             status_cls, status_lbl = "status-stopped", "Detenido"
@@ -286,8 +298,10 @@ def render(data: dict) -> str:
     <span style="float:right;font-size:10px;color:#64748b">${a['cost_today']} hoy</span>
   </div>
   <div class="agent-task">{cur_task}</div>
+  <div style="font-size:10px;color:{elig_color};margin-top:6px">{elig_text}</div>
   <div class="agent-actions">
     <button class="btn {btn_cls} btn-sm" onclick="event.stopPropagation();agentToggle('{a['id']}',{str(running).lower()})">{btn_lbl}</button>
+    <button class="btn btn-outline btn-sm" onclick="event.stopPropagation();toggleAgentEnabled('{a['id']}',{str(a.get('enabled', True)).lower()})">{'Desactivar' if a.get('enabled', True) else 'Activar'}</button>
     <button class="btn btn-gray btn-sm" onclick="event.stopPropagation();openTerminal('{a['id']}')" title="Abrir PowerShell con log en vivo" style="background:#4f46e5">PS</button>
     {rm_btn}
   </div>
@@ -352,6 +366,10 @@ def render(data: dict) -> str:
                         for k,v in specs.items() if k not in ("project_manager","orchestrator"))
     prov_opts = "".join(f'<option value="{k}">{v["label"]}</option>' for k,v in provs.items())
     sched_st  = f"Programado {sched.get('start_time','?')} → {sched.get('stop_time','?')}" if sched.get("enabled") else "Sin programar"
+    preset_opts = "".join(
+        f'<option value="{preset["id"]}"{" selected" if preset["active"] else ""}>{preset["label"]}</option>'
+        for preset in team.get("presets", [])
+    )
 
     sys_run = data["sys_running"]
     raw_alerts = data.get("alerts", [])
@@ -462,6 +480,22 @@ select,input[type=text]{{width:100%;background:#0f172a;border:1px solid #334155;
   <button class="btn btn-blue" onclick="document.getElementById('mbg').classList.add('open')">+ Agente</button>
   <button class="btn btn-blue" onclick="openConfigModal()" style="background:#8b5cf6">Configuracion</button>
   <button class="btn btn-blue" onclick="openSprintModal()" style="background:#d946ef">+ Sprint</button>
+</div>
+
+<div class="section" style="margin-bottom:12px">
+  <div class="section-title">Equipo activo</div>
+  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+    <select id="preset-sel" onchange="changePreset(this.value)" style="max-width:240px">
+      {preset_opts}
+    </select>
+    <span style="font-size:11px;color:#64748b">Stack actual: {active_stack or 'ALL'}</span>
+    <button class="btn btn-sm btn-outline" onclick="toggleStack('BACK', true)">BACK on</button>
+    <button class="btn btn-sm btn-outline" onclick="toggleStack('BACK', false)">BACK off</button>
+    <button class="btn btn-sm btn-outline" onclick="toggleStack('BO', true)">BO on</button>
+    <button class="btn btn-sm btn-outline" onclick="toggleStack('BO', false)">BO off</button>
+    <button class="btn btn-sm btn-outline" onclick="toggleStack('MOB', true)">MOB on</button>
+    <button class="btn btn-sm btn-outline" onclick="toggleStack('MOB', false)">MOB off</button>
+  </div>
 </div>
 
 <!-- Quick scheduler controls under topbar -->
@@ -660,6 +694,24 @@ function toggleLog(id){{
 
 async function agentToggle(id,running){{
   await fetch('/api/agents/'+id+'/'+(running?'stop':'start'),{{method:'POST'}});location.reload();
+}}
+
+async function toggleAgentEnabled(id,enabled){{
+  await fetch('/api/agents/'+id+'/enabled',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+    body:JSON.stringify({{enabled:!enabled}})}});
+  location.reload();
+}}
+
+async function changePreset(preset){{
+  await fetch('/api/team/preset',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+    body:JSON.stringify({{preset}})}});
+  location.reload();
+}}
+
+async function toggleStack(stack, enabled){{
+  await fetch('/api/team/stack',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+    body:JSON.stringify({{stack_key:stack, enabled}})}});
+  location.reload();
 }}
 
 async function removeAgent(id){{
@@ -919,7 +971,10 @@ class Handler(BaseHTTPRequestHandler):
         elif p.endswith("/start"):      self._json(start_agent(p.split("/")[3]))
         elif p.endswith("/stop"):       self._json(stop_agent(p.split("/")[3]))
         elif p.endswith("/terminal"):   self._json(open_terminal(p.split("/")[3]))
+        elif p.endswith("/enabled"):    self._json(set_agent_enabled(p.split("/")[3], bool(body.get("enabled", True))))
         elif p=="/api/agents":         self._json(add_agent(body))
+        elif p=="/api/team/preset":    self._json(set_active_preset(body.get("preset", "")))
+        elif p=="/api/team/stack":     self._json(set_agents_enabled_for_stack(body.get("stack_key", ""), bool(body.get("enabled", True))))
         elif p=="/api/schedule":       save_schedule(body);self._json({"ok":True})
         elif p.startswith("/api/sprint/") and p.endswith("/pause"):
             sid = p.split("/")[3]
