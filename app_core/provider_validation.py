@@ -96,19 +96,26 @@ def _validate_gitlab_token(token: str, host: str = "") -> dict:
     api_root = (host or "https://gitlab.com/api/v4").rstrip("/")
     if not api_root.endswith("/api/v4"):
         api_root = api_root + "/api/v4"
-    response = requests.get(
-        f"{api_root}/user",
-        headers={"PRIVATE-TOKEN": token},
-        timeout=12,
+    attempts = (
+        {"PRIVATE-TOKEN": token},
+        {"Authorization": f"Bearer {token}"},
     )
-    if 200 <= response.status_code < 300:
-        payload = response.json()
-        return {
-            "ok": True,
-            "validated": True,
-            "provider": "gitlab",
-            "host": api_root,
-            "username": payload.get("username", ""),
-            "validated_at": datetime.utcnow().isoformat(),
-        }
-    return {"ok": False, "error": f"GitLab HTTP {response.status_code}: {response.text[:240]}"}
+    last_response = None
+    for headers in attempts:
+        response = requests.get(
+            f"{api_root}/user",
+            headers=headers,
+            timeout=12,
+        )
+        last_response = response
+        if 200 <= response.status_code < 300:
+            payload = response.json()
+            return {
+                "ok": True,
+                "validated": True,
+                "provider": "gitlab",
+                "host": api_root,
+                "username": payload.get("username", ""),
+                "validated_at": datetime.utcnow().isoformat(),
+            }
+    return {"ok": False, "error": f"GitLab HTTP {last_response.status_code}: {last_response.text[:240]}"}
