@@ -27,15 +27,18 @@ class InstallerApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("Agentic Local Manager Installer")
-        self.root.geometry("980x760")
-        self.root.minsize(920, 700)
+        self.root.geometry("860x680")
+        self.root.minsize(780, 620)
 
         self.install_dir = tk.StringVar(value=str((Path.home() / "AgenticLocalManager").resolve()))
         self.git_provider = tk.StringVar(value="github")
         self.git_host = tk.StringVar(value="https://api.github.com")
         self.git_token = tk.StringVar()
+        self.git_show_token = tk.BooleanVar(value=False)
         self.git_status = tk.StringVar(value="Todavia no validado.")
         self.git_status_label: ttk.Label | None = None
+        self.git_host_entry: ttk.Entry | None = None
+        self.git_token_entry: ttk.Entry | None = None
         self.summary_text = tk.StringVar()
         self.install_warning = tk.StringVar()
         self.launch_after_install = tk.BooleanVar(value=True)
@@ -149,9 +152,9 @@ class InstallerApp:
         ).pack(anchor="w", pady=(6, 14))
 
         ttk.Label(parent, text="Host o API base", font=("Segoe UI", 10, "bold")).pack(anchor="w")
-        git_host_entry = ttk.Entry(parent, textvariable=self.git_host)
-        git_host_entry.pack(fill="x", pady=(4, 0))
-        self._attach_context_menu(git_host_entry)
+        self.git_host_entry = ttk.Entry(parent, textvariable=self.git_host)
+        self.git_host_entry.pack(fill="x", pady=(4, 0))
+        self._attach_context_menu(self.git_host_entry)
         ttk.Label(
             parent,
             text="Ejemplos: https://api.github.com o https://gitlab.com. Para GitLab self-hosted podés usar la URL raíz.",
@@ -160,9 +163,10 @@ class InstallerApp:
         ).pack(anchor="w", pady=(6, 14))
 
         ttk.Label(parent, text="Token de acceso", font=("Segoe UI", 10, "bold")).pack(anchor="w")
-        git_token_entry = ttk.Entry(parent, textvariable=self.git_token, show="*")
-        git_token_entry.pack(fill="x", pady=(4, 0))
-        self._attach_context_menu(git_token_entry)
+        self.git_token_entry = ttk.Entry(parent, textvariable=self.git_token, show="*")
+        self.git_token_entry.pack(fill="x", pady=(4, 0))
+        self._attach_context_menu(self.git_token_entry)
+        ttk.Checkbutton(parent, text="Ver clave", variable=self.git_show_token, command=self._toggle_git_token_visibility).pack(anchor="w", pady=(6, 0))
         ttk.Label(
             parent,
             text=(
@@ -202,10 +206,11 @@ class InstallerApp:
             box.pack(fill="x", pady=(0, 10))
 
             enabled_var = tk.BooleanVar(value=bool(service.get("available")))
+            show_secret_var = tk.BooleanVar(value=False)
             api_key_var = tk.StringVar()
             status_var = tk.StringVar(value="Deshabilitado")
 
-            ttk.Checkbutton(box, text="Habilitar servicio", variable=enabled_var).pack(anchor="w")
+            ttk.Checkbutton(box, text="Habilitar servicio", variable=enabled_var, command=lambda sid=service_id: self._handle_service_enabled_toggle(sid)).pack(anchor="w")
             ttk.Label(
                 box,
                 text=self._service_help_text(service_id, service),
@@ -219,6 +224,7 @@ class InstallerApp:
                 api_key_entry = ttk.Entry(box, textvariable=api_key_var, show="*")
                 api_key_entry.pack(fill="x", pady=(4, 0))
                 self._attach_context_menu(api_key_entry)
+                ttk.Checkbutton(box, text="Ver clave", variable=show_secret_var, command=lambda sid=service_id: self._toggle_service_secret_visibility(sid)).pack(anchor="w", pady=(6, 0))
                 ttk.Label(
                     box,
                     text="Pegá la API key emitida por el portal del proveedor. El instalador hará una validación mínima antes de marcar el servicio como disponible.",
@@ -237,7 +243,9 @@ class InstallerApp:
             status_label.pack(anchor="w", pady=(8, 0))
             self.service_vars[service_id] = {
                 "enabled": enabled_var,
+                "show_secret": show_secret_var,
                 "api_key": api_key_var,
+                "api_key_entry": api_key_entry if service.get("mode") == "api" else None,
                 "status": status_var,
                 "status_label": status_label,
             }
@@ -320,6 +328,47 @@ class InstallerApp:
 
     def _sync_git_host(self) -> None:
         self.git_host.set("https://api.github.com" if self.git_provider.get() == "github" else "https://gitlab.com/api/v4")
+        self._unlock_git_credentials()
+
+    def _toggle_git_token_visibility(self) -> None:
+        if self.git_token_entry is not None:
+            self.git_token_entry.configure(show="" if self.git_show_token.get() else "*")
+
+    def _toggle_service_secret_visibility(self, service_id: str) -> None:
+        field_state = self.service_vars[service_id]
+        entry = field_state.get("api_key_entry")
+        if entry is not None:
+            entry.configure(show="" if field_state["show_secret"].get() else "*")
+
+    def _handle_service_enabled_toggle(self, service_id: str) -> None:
+        field_state = self.service_vars[service_id]
+        service = self.settings["llm_services"][service_id]
+        is_enabled = field_state["enabled"].get()
+        if not is_enabled:
+            service["available"] = False
+            service["validated"] = False
+            entry = field_state.get("api_key_entry")
+            if entry is not None:
+                entry.state(["!disabled"])
+        elif service.get("validated") and field_state.get("api_key_entry") is not None:
+            field_state["api_key_entry"].state(["disabled"])
+        self._refresh_profile_dropdowns()
+
+    def _lock_git_credentials(self) -> None:
+        if self.git_host_entry is not None:
+            self.git_host_entry.state(["disabled"])
+        if self.git_token_entry is not None:
+            self.git_token_entry.state(["disabled"])
+
+    def _unlock_git_credentials(self) -> None:
+        self.settings["git"]["validated"] = False
+        self.git_status.set("Todavia no validado.")
+        if self.git_status_label:
+            self.git_status_label.configure(foreground="#475569")
+        if self.git_host_entry is not None:
+            self.git_host_entry.state(["!disabled"])
+        if self.git_token_entry is not None:
+            self.git_token_entry.state(["!disabled"])
 
     def _service_help_text(self, service_id: str, service: dict) -> str:
         lookup = {
@@ -412,11 +461,13 @@ class InstallerApp:
             self.git_status.set("✓ Credencial valida. Validada.")
             if self.git_status_label:
                 self.git_status_label.configure(foreground="#0f766e")
+            self._lock_git_credentials()
         else:
             self.settings["git"]["validated"] = False
             self.git_status.set("✗ Credencial invalida.")
             if self.git_status_label:
                 self.git_status_label.configure(foreground="#b91c1c")
+            self._unlock_git_credentials()
 
     def validate_service_credentials(self, service_id: str) -> None:
         field_state = self.service_vars[service_id]
@@ -452,11 +503,15 @@ class InstallerApp:
             service["validated_at"] = result.get("validated_at", "")
             field_state["status"].set("✓ Credencial valida. Validada.")
             field_state["status_label"].configure(foreground="#0f766e")
+            if field_state.get("api_key_entry") is not None and field_state["enabled"].get():
+                field_state["api_key_entry"].state(["disabled"])
         else:
             service["available"] = False
             service["validated"] = False
             field_state["status"].set("✗ Credencial invalida.")
             field_state["status_label"].configure(foreground="#b91c1c")
+            if field_state.get("api_key_entry") is not None:
+                field_state["api_key_entry"].state(["!disabled"])
         self._refresh_profile_dropdowns()
 
     def _refresh_profile_dropdowns(self) -> None:
