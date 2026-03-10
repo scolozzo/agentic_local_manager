@@ -564,15 +564,15 @@ select,input[type=text]{{width:100%;background:#0f172a;border:1px solid #334155;
       <h4 style="font-size:13px;color:#94a3b8;margin-bottom:10px">DIRECTORIOS GIT (Rutas locales)</h4>
       <div class="fg">
         <label>BACK (FastAPI · PostgreSQL)</label>
-        <input type="text" id="git-back" placeholder="C:\Users\...\repos\backend">
+        <input type="text" id="git-back" placeholder="C:\\Users\\...\\repos\\backend">
       </div>
       <div class="fg">
         <label>BO (Next.js · shadcn/ui)</label>
-        <input type="text" id="git-bo" placeholder="C:\Users\...\repos\backoffice">
+        <input type="text" id="git-bo" placeholder="C:\\Users\\...\\repos\\backoffice">
       </div>
       <div class="fg">
         <label>MOB (Android · Compose)</label>
-        <input type="text" id="git-mob" placeholder="C:\Users\...\repos\mobile">
+        <input type="text" id="git-mob" placeholder="C:\\Users\\...\\repos\\mobile">
       </div>
       <button class="btn btn-green" onclick="saveGitDirs()" style="width:100%">Guardar Directorios</button>
     </div>
