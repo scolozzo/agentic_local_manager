@@ -376,7 +376,7 @@ def render(data: dict) -> str:
         p = pct(s)
         pre = f'<div style="color:#475569;font-size:11px;margin-top:5px">{prereqs[name]}</div>' if p==0 and name in prereqs else ""
         stack_html += f"""<div class="card">
-  <h2 style="color:{color}">{project.get('project_id','PROJ')}-{name} <span style="font-size:11px;color:#475569;font-weight:400">{labels[name]}</span></h2>
+  <h2 style="color:{color}">{name} <span style="font-size:11px;color:#475569;font-weight:400">{labels[name]}</span></h2>
   <div class="prog-wrap"><div class="prog-bar" style="width:{p}%;background:{color}"></div></div>
   <div class="pct">{p}% &nbsp;·&nbsp; {s['verified']}/{s['total']} tareas</div>
   <div style="margin-top:6px">{badges(s['by_state'])}</div>{pre}
@@ -561,15 +561,11 @@ def render(data: dict) -> str:
     <div style="font-size:12px;color:#94a3b8;margin-bottom:12px">El sistema necesita primero un proyecto. Hasta que no exista uno, no se muestran tablero ni agentes.</div>
     <div class="fg">
       <label>Nombre del proyecto</label>
-      <input type="text" id="onboard-proj-name" placeholder="Nombre completo" oninput="updateGeneratedProjectId('onboard')">
+      <input type="text" id="onboard-proj-name" placeholder="Nombre completo">
     </div>
     <div class="fg">
       <label>Descripcion</label>
       <input type="text" id="onboard-proj-desc" placeholder="Descripcion breve">
-    </div>
-    <div class="fg">
-      <label>ID generado</label>
-      <input type="text" id="onboard-proj-id" placeholder="Se genera automaticamente" readonly>
     </div>
     <button class="btn btn-green" onclick="createProject()" style="width:100%">Crear proyecto</button>
   </div>
@@ -767,7 +763,7 @@ select,input[type=text]{{width:100%;background:#0f172a;border:1px solid #334155;
 <div class="section" style="margin-bottom:12px">
   <div class="section-title">Proyecto activo</div>
   <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
-    <span style="font-size:12px;color:#e2e8f0">{project.get('project_id','Sin proyecto')}</span>
+    <span style="font-size:12px;color:#e2e8f0">{project.get('name','Sin proyecto')}</span>
     <select id="project-template-sel" onchange="updateProjectTemplate(this.value)" style="max-width:260px" {'disabled' if not project_exists else ''}>
       {template_opts}
     </select>
@@ -889,15 +885,11 @@ select,input[type=text]{{width:100%;background:#0f172a;border:1px solid #334155;
         <div id="project-list" style="max-height:150px;overflow-y:auto;margin-bottom:12px"></div>
         <div class="fg">
           <label>Nombre del Proyecto</label>
-          <input type="text" id="new-proj-name" placeholder="Nombre completo" oninput="updateGeneratedProjectId()">
+          <input type="text" id="new-proj-name" placeholder="Nombre completo">
         </div>
         <div class="fg">
           <label>Descripcion</label>
           <input type="text" id="new-proj-desc" placeholder="Detalles del proyecto">
-        </div>
-        <div class="fg">
-          <label>ID generado</label>
-          <input type="text" id="new-proj-id" placeholder="Se genera automaticamente" readonly>
         </div>
         <button class="btn btn-green" onclick="createProject()" style="width:100%">Crear Proyecto</button>
       </div>
@@ -1145,21 +1137,6 @@ function updModels(){{
 }}
 updModels();
 
-function slugifyProjectId(name){{
-  return (name||'')
-    .normalize('NFD').replace(/[\\u0300-\\u036f]/g,'')
-    .toUpperCase()
-    .replace(/[^A-Z0-9]+/g,'_')
-    .replace(/^_+|_+$/g,'')
-    .slice(0,32);
-}}
-
-function updateGeneratedProjectId(scope='config'){{
-  const name=document.getElementById(scope==='onboard' ? 'onboard-proj-name' : 'new-proj-name')?.value||'';
-  const idField=document.getElementById(scope==='onboard' ? 'onboard-proj-id' : 'new-proj-id');
-  if(idField)idField.value=slugifyProjectId(name);
-}}
-
 function refreshSubprojectForm(scope='main'){{
   const suffix=scope==='config' ? '-config' : '';
   const stack=document.getElementById('subproject-stack'+suffix)?.value||'BACK';
@@ -1378,7 +1355,7 @@ async function loadProjectList(){{
   const projects=await r.json();
   let html='<div style="font-size:10px;color:#64748b;margin-bottom:8px">Cambiar proyecto:</div>';
   for(const p of projects){{
-    html+=`<button class="btn btn-outline btn-sm" style="width:100%;text-align:left;margin-bottom:4px;padding:6px;font-size:11px" onclick="selectProject('${{p.project_id}}')">✓ ${{p.project_id}}: ${{p.name}}</button>`;
+    html+=`<button class="btn btn-outline btn-sm" style="width:100%;text-align:left;margin-bottom:4px;padding:6px;font-size:11px" onclick="selectProject('${{p.project_id}}')">✓ ${{p.name}}</button>`;
   }}
   document.getElementById('project-list').innerHTML=html;
 }}
@@ -1398,21 +1375,17 @@ async function selectProject(projectId){{
 }}
 
 async function createProject(){{
-  const id=(document.getElementById('onboard-proj-id')?.value||document.getElementById('new-proj-id')?.value||'').trim();
   const name=(document.getElementById('onboard-proj-name')?.value||document.getElementById('new-proj-name')?.value||'').trim();
   const desc=(document.getElementById('onboard-proj-desc')?.value||document.getElementById('new-proj-desc')?.value||'').trim();
   const template_id=document.getElementById('project-template-sel')?.value||'software_delivery_default';
   if(!name||!desc){{alert('Nombre y descripcion son requeridos');return;}}
-  if(!id){{alert('No se pudo generar un ID valido para el proyecto');return;}}
   const r=await fetch('/api/projects/create',{{method:'POST',headers:{{'Content-Type':'application/json'}},
-    body:JSON.stringify({{project_id:id,name,description:desc,git_dirs:{{}},template_id}})}});
+    body:JSON.stringify({{name,description:desc,git_dirs:{{}},template_id}})}});
   const d=await r.json();
   if(d.ok){{
-    alert('Proyecto '+id+' creado correctamente');
-    if(document.getElementById('new-proj-id'))document.getElementById('new-proj-id').value='';
+    alert('Proyecto '+name+' creado correctamente');
     if(document.getElementById('new-proj-name'))document.getElementById('new-proj-name').value='';
     if(document.getElementById('new-proj-desc'))document.getElementById('new-proj-desc').value='';
-    if(document.getElementById('onboard-proj-id'))document.getElementById('onboard-proj-id').value='';
     if(document.getElementById('onboard-proj-name'))document.getElementById('onboard-proj-name').value='';
     if(document.getElementById('onboard-proj-desc'))document.getElementById('onboard-proj-desc').value='';
     loadProjectList();
@@ -1596,16 +1569,13 @@ class Handler(BaseHTTPRequestHandler):
         elif p=="/api/schedule":       save_schedule(body);self._json({"ok":True})
         elif p.startswith("/api/sprint/") and p.endswith("/pause"):
             sid = p.split("/")[3]
-            from app_core.memory_store import MemoryStore
             msg = MemoryStore().sprint_pause(sid)
             self._json({"ok": True, "message": msg})
         elif p.startswith("/api/sprint/") and p.endswith("/resume"):
             sid = p.split("/")[3]
-            from app_core.memory_store import MemoryStore
             msg = MemoryStore().sprint_resume(sid)
             self._json({"ok": True, "message": msg})
         elif p == "/api/projects":
-            from app_core.memory_store import MemoryStore
             self._json(MemoryStore().project_list())
         elif p == "/api/projects/create":
             try:
@@ -1771,7 +1741,6 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._json({"ok": False, "error": str(e)}, 400)
         elif p == "/api/sprints/create":
-            from app_core.memory_store import MemoryStore
             from app_core.sprint_manager import create_sprint_from_plan
             try:
                 store = MemoryStore()

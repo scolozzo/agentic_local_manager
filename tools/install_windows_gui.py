@@ -40,6 +40,11 @@ class InstallerApp:
         self.install_warning = tk.StringVar()
         self.launch_after_install = tk.BooleanVar(value=True)
         self.auto_fallback_active = False
+        self.context_menu = tk.Menu(self.root, tearoff=0)
+        self.context_menu.add_command(label="Cortar", command=lambda: self._context_menu_event("<<Cut>>"))
+        self.context_menu.add_command(label="Copiar", command=lambda: self._context_menu_event("<<Copy>>"))
+        self.context_menu.add_command(label="Pegar", command=lambda: self._context_menu_event("<<Paste>>"))
+        self.context_menu_widget: tk.Widget | None = None
 
         self.service_vars: dict[str, dict] = {}
         self.role_default_vars = {
@@ -106,7 +111,9 @@ class InstallerApp:
         ttk.Label(parent, text="Directorio de instalacion", font=("Segoe UI", 10, "bold")).pack(anchor="w")
         row = ttk.Frame(parent)
         row.pack(fill="x", pady=(4, 0))
-        ttk.Entry(row, textvariable=self.install_dir).pack(side="left", fill="x", expand=True)
+        install_entry = ttk.Entry(row, textvariable=self.install_dir)
+        install_entry.pack(side="left", fill="x", expand=True)
+        self._attach_context_menu(install_entry)
         ttk.Button(row, text="Examinar", command=self._browse_install_dir).pack(side="left", padx=(8, 0))
         ttk.Label(
             parent,
@@ -142,7 +149,9 @@ class InstallerApp:
         ).pack(anchor="w", pady=(6, 14))
 
         ttk.Label(parent, text="Host o API base", font=("Segoe UI", 10, "bold")).pack(anchor="w")
-        ttk.Entry(parent, textvariable=self.git_host).pack(fill="x", pady=(4, 0))
+        git_host_entry = ttk.Entry(parent, textvariable=self.git_host)
+        git_host_entry.pack(fill="x", pady=(4, 0))
+        self._attach_context_menu(git_host_entry)
         ttk.Label(
             parent,
             text="Ejemplos: https://api.github.com o https://gitlab.com. Para GitLab self-hosted podés usar la URL raíz.",
@@ -151,7 +160,9 @@ class InstallerApp:
         ).pack(anchor="w", pady=(6, 14))
 
         ttk.Label(parent, text="Token de acceso", font=("Segoe UI", 10, "bold")).pack(anchor="w")
-        ttk.Entry(parent, textvariable=self.git_token, show="*").pack(fill="x", pady=(4, 0))
+        git_token_entry = ttk.Entry(parent, textvariable=self.git_token, show="*")
+        git_token_entry.pack(fill="x", pady=(4, 0))
+        self._attach_context_menu(git_token_entry)
         ttk.Label(
             parent,
             text=(
@@ -205,7 +216,9 @@ class InstallerApp:
 
             if service.get("mode") == "api":
                 ttk.Label(box, text="API key", font=("Segoe UI", 9, "bold")).pack(anchor="w")
-                ttk.Entry(box, textvariable=api_key_var, show="*").pack(fill="x", pady=(4, 0))
+                api_key_entry = ttk.Entry(box, textvariable=api_key_var, show="*")
+                api_key_entry.pack(fill="x", pady=(4, 0))
+                self._attach_context_menu(api_key_entry)
                 ttk.Label(
                     box,
                     text="Pegá la API key emitida por el portal del proveedor. El instalador hará una validación mínima antes de marcar el servicio como disponible.",
@@ -272,6 +285,21 @@ class InstallerApp:
         selected = filedialog.askdirectory(initialdir=self.install_dir.get() or str(Path.home()))
         if selected:
             self.install_dir.set(selected)
+
+    def _attach_context_menu(self, widget: tk.Widget) -> None:
+        widget.bind("<Button-3>", self._show_context_menu)
+        widget.bind("<Control-v>", lambda _event: widget.event_generate("<<Paste>>"))
+        widget.bind("<Control-c>", lambda _event: widget.event_generate("<<Copy>>"))
+        widget.bind("<Control-x>", lambda _event: widget.event_generate("<<Cut>>"))
+
+    def _show_context_menu(self, event: tk.Event) -> str:
+        self.context_menu_widget = event.widget
+        self.context_menu.tk_popup(event.x_root, event.y_root)
+        return "break"
+
+    def _context_menu_event(self, virtual_event: str) -> None:
+        if self.context_menu_widget is not None:
+            self.context_menu_widget.event_generate(virtual_event)
 
     def _bind_mousewheel(self, canvas: tk.Canvas) -> None:
         canvas.bind_all("<MouseWheel>", lambda event: self._on_mousewheel(event, canvas))
