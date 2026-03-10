@@ -17,6 +17,16 @@ from app_core.agent_config import (
 _RUNNING: dict[str, subprocess.Popen] = {}
 _SCHEDULE_PATH = REPO_ROOT / "config" / "schedule.json"
 _STACK_KEYS = ("BACK", "BO", "MOB")
+_SUBSTACK_ALIASES = {
+    "": "",
+    "api": "api",
+    "db": "db",
+    "backoffice": "backoffice",
+    "landing": "landing",
+    "android": "android",
+    "ios": "ios",
+    "flutter": "flutter",
+}
 
 
 def _normalize_agents(catalog: dict) -> list[dict]:
@@ -81,6 +91,10 @@ def _to_iterable(value: str | Iterable[str] | None) -> list[str]:
 
 def _as_stack_key(value: str | None) -> str:
     return (value or "").strip().upper()
+
+
+def _as_substack_key(value: str | None) -> str:
+    return _SUBSTACK_ALIASES.get((value or "").strip().lower(), (value or "").strip().lower())
 
 
 def _matches_any(candidate: str, options: Iterable[str]) -> bool:
@@ -168,14 +182,21 @@ def list_eligible_agents(
 
 
 def get_team_status() -> dict:
+    return get_team_status_for(None)
+
+
+def get_team_status_for(active_team_id: str | None) -> dict:
     presets_cfg = load_agent_presets()
-    active_name = get_active_preset_name()
+    active_name = active_team_id or get_active_preset_name()
     presets = []
     for preset_id, preset in presets_cfg.get("presets", {}).items():
         preset_data = dict(preset)
         preset_data.setdefault("label", preset_id)
         preset_data.setdefault("supported_stacks", list(_STACK_KEYS))
         preset_data.setdefault("suggested_counts", {})
+        preset_data.setdefault("skills", [])
+        preset_data.setdefault("substacks", [])
+        preset_data.setdefault("stack_key", preset_data.get("supported_stacks", [""])[0] if preset_data.get("supported_stacks") else "")
         preset_data["id"] = preset_id
         preset_data["active"] = preset_id == active_name
         presets.append(preset_data)
@@ -230,8 +251,8 @@ def stop_agent(agent_id: str) -> dict:
     return {"ok": True}
 
 
-def start_all() -> dict:
-    results = [start_agent(agent["id"]) for agent in list_eligible_agents(preset_name=get_active_preset_name())]
+def start_all(preset_name: str | None = None) -> dict:
+    results = [start_agent(agent["id"]) for agent in list_eligible_agents(preset_name=preset_name or get_active_preset_name())]
     return {"ok": all(result.get("ok") for result in results)}
 
 
@@ -296,11 +317,64 @@ def set_agents_enabled_for_stack(stack_key: str, enabled: bool, roles: tuple[str
 
 
 def remove_agent(agent_id: str) -> dict:
+    agent = get_agent(agent_id)
+    if agent and not agent.get("removable", True):
+        return {"ok": False, "error": "Agent is locked by sprint team"}
     catalog = load_agent_catalog()
     before = len(catalog.get("agents", []))
     catalog["agents"] = [agent for agent in catalog.get("agents", []) if agent.get("id") != agent_id]
     save_agent_catalog(catalog)
     return {"ok": len(catalog["agents"]) < before}
+
+
+def list_team_presets(stack_key: str | None = None, substack: str | None = None) -> list[dict]:
+    requested_stack = _as_stack_key(stack_key)
+    requested_substack = _as_substack_key(substack)
+    teams = []
+    for team in get_team_status_for(None)["presets"]:
+        team_stack = _as_stack_key(team.get("stack_key"))
+        team_substacks = [_as_substack_key(item) for item in team.get("substacks", [])]
+        if requested_stack and team_stack and team_stack != requested_stack:
+            continue
+        if requested_substack and team_substacks and requested_substack not in team_substacks:
+            continue
+        teams.append(team)
+    return teams
+
+
+def get_team_preset(team_id: str | None) -> dict | None:
+    if not team_id:
+        return None
+    return next((team for team in get_team_status_for(team_id)["presets"] if team.get("id") == team_id), None)
+
+
+def suggest_team_for_scope(stack_key: str | None, substack: str | None = None) -> dict | None:
+    teams = list_team_presets(stack_key=stack_key, substack=substack)
+    requested_substack = _as_substack_key(substack)
+    if requested_substack:
+        teams.sort(
+            key=lambda team: (
+                0 if requested_substack in [_as_substack_key(item) for item in team.get("substacks", [])] else 1,
+                len(team.get("substacks", [])) or 99,
+            )
+        )
+    return teams[0] if teams else None
+
+
+def validate_agent_for_team(agent_data: dict, team_id: str | None) -> tuple[bool, str]:
+    if not team_id:
+        return True, ""
+    team = get_team_preset(team_id)
+    if not team:
+        return False, "Team not found"
+    normalized = normalize_agent_definition(agent_data)
+    if normalized.get("role") != "developer":
+        return True, ""
+    allowed_skills = set(team.get("skills", []))
+    specialization = normalized.get("specialization", "")
+    if specialization not in allowed_skills:
+        return False, f"El team '{team.get('label', team_id)}' no permite el skill '{specialization}'."
+    return True, ""
 
 
 def system_running() -> bool:

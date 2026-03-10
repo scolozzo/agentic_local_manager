@@ -16,15 +16,44 @@ sys.path.insert(0, str(Path(__file__).parent))
 from app_core.agent_manager import (
     load_agents, load_specializations, get_log, get_current_task,
     get_agent, start_agent, stop_agent, start_all, stop_all, is_running,
-    add_agent, remove_agent, system_running, get_team_status,
-    get_agents_with_eligibility, set_active_preset, set_agents_enabled_for_stack,
+    add_agent, remove_agent, system_running, get_team_status_for,
+    get_agents_with_eligibility, get_team_preset, list_team_presets, set_agents_enabled_for_stack,
+    suggest_team_for_scope, update_agent, validate_agent_for_team,
     set_agent_enabled,
     get_schedule, save_schedule, start_scheduler,
 )
 from app_core.alert_manager import get_active_alerts, clear_alert
+from app_core.memory_store import MemoryStore
+from app_core.project_context import require_project_context, resolve_project_context, set_active_project_id
+from app_core.project_templates import get_workflow_definition, get_project_template, list_project_templates
+from app_core.project_validation import validate_project_configuration, resolve_stack_for_project
 
 BASE_DIR = Path(__file__).parent
 PORT     = 8888
+
+
+def _preview_project_context(
+    *,
+    project_id: str,
+    name: str,
+    description: str,
+    template_id: str,
+    git_dirs: dict,
+    directives: dict,
+) -> dict:
+    template = get_project_template(template_id)
+    context = {
+        "project_id": project_id,
+        "name": name,
+        "description": description,
+        "template_id": template_id,
+        "template": template,
+        "workflow": get_workflow_definition(template_id),
+        "git_dirs": git_dirs,
+        "directives": directives,
+    }
+    context["validation_errors"] = validate_project_configuration(context)
+    return context
 
 # ── Cargar .env ────────────────────────────────────────────────────────────────
 env_path = BASE_DIR / "VeloxIq" / ".env"
@@ -94,10 +123,10 @@ def local_certified_endpoints() -> list:
 _board_cache: dict = {}
 _board_cache_ts: float = 0
 
-def get_local_board_data(sprint_id: str = "") -> dict:
+def get_local_board_data(sprint_id: str = "", project_id: str = "") -> dict:
     global _board_cache, _board_cache_ts
     import time
-    cache_key = sprint_id or "__all__"
+    cache_key = f"{project_id or '__project__'}::{sprint_id or '__all__'}"
     if time.time() - _board_cache_ts < 10 and _board_cache.get("_key") == cache_key:
         return _board_cache
 
@@ -105,36 +134,71 @@ def get_local_board_data(sprint_id: str = "") -> dict:
     stacks  = {k: {"total": 0, "verified": 0, "by_state": {}} for k in ["BACK", "BO", "MOB"]}
     parsed  = []
     sprints = []
-    active_sprint = {"name": "Sprint Local", "sprint_id": "", "stack": ""}
+    active_sprint = {"name": "Sprint Local", "sprint_id": "", "stack": "", "team_id": "", "substack": ""}
+
+    if not project_id:
+        _board_cache = {
+            "active_sprint": {"name": "Sin proyecto", "sprint_id": "", "stack": "", "project_id": "", "team_id": "", "substack": ""},
+            "issues":  [],
+            "stacks":  stacks,
+            "sprints": [],
+            "_key":    cache_key,
+        }
+        _board_cache_ts = time.time()
+        return _board_cache
 
     if db.exists():
         try:
             con = sqlite3.connect(db)
 
             # Load sprints list
-            sprint_rows = con.execute(
-                "SELECT sprint_id, name, stack, status FROM sprints ORDER BY created_at DESC"
-            ).fetchall()
+            if project_id:
+                sprint_rows = con.execute(
+                    "SELECT sprint_id, name, stack, status, project_id, team_id, substack FROM sprints WHERE project_id = ? ORDER BY created_at DESC",
+                    (project_id,),
+                ).fetchall()
+            else:
+                sprint_rows = con.execute(
+                    "SELECT sprint_id, name, stack, status, project_id, team_id, substack FROM sprints ORDER BY created_at DESC"
+                ).fetchall()
             for sr in sprint_rows:
-                sprints.append({"sprint_id": sr[0], "name": sr[1], "stack": sr[2], "status": sr[3]})
+                sprints.append({"sprint_id": sr[0], "name": sr[1], "stack": sr[2], "status": sr[3], "project_id": sr[4], "team_id": sr[5], "substack": sr[6]})
                 if sr[3] == "active" and not sprint_id:
-                    active_sprint = {"name": sr[1], "sprint_id": sr[0], "stack": sr[2]}
+                    active_sprint = {"name": sr[1], "sprint_id": sr[0], "stack": sr[2], "project_id": sr[4], "team_id": sr[5], "substack": sr[6]}
 
             # Load tasks filtered by sprint
             if sprint_id:
-                rows = con.execute(
-                    "SELECT task_id, summary, state, stack, priority, depends_on, parallel, sprint_id "
-                    "FROM local_board WHERE sprint_id=? ORDER BY created_at ASC", (sprint_id,)
-                ).fetchall()
+                if project_id:
+                    rows = con.execute(
+                        "SELECT lb.task_id, lb.summary, lb.state, lb.stack, lb.priority, lb.depends_on, lb.parallel, lb.sprint_id "
+                        "FROM local_board lb "
+                        "JOIN sprints s ON s.sprint_id = lb.sprint_id "
+                        "WHERE lb.sprint_id = ? AND s.project_id = ? ORDER BY lb.created_at ASC",
+                        (sprint_id, project_id),
+                    ).fetchall()
+                else:
+                    rows = con.execute(
+                        "SELECT task_id, summary, state, stack, priority, depends_on, parallel, sprint_id "
+                        "FROM local_board WHERE sprint_id=? ORDER BY created_at ASC", (sprint_id,)
+                    ).fetchall()
                 # Sprint name for selected sprint
                 for sr in sprints:
                     if sr["sprint_id"] == sprint_id:
-                        active_sprint = {"name": sr["name"], "sprint_id": sprint_id, "stack": sr["stack"]}
+                        active_sprint = {"name": sr["name"], "sprint_id": sprint_id, "stack": sr["stack"], "project_id": sr["project_id"], "team_id": sr.get("team_id", ""), "substack": sr.get("substack", "")}
             else:
-                rows = con.execute(
-                    "SELECT task_id, summary, state, stack, priority, depends_on, parallel, sprint_id "
-                    "FROM local_board ORDER BY created_at ASC"
-                ).fetchall()
+                if project_id:
+                    rows = con.execute(
+                        "SELECT lb.task_id, lb.summary, lb.state, lb.stack, lb.priority, lb.depends_on, lb.parallel, lb.sprint_id "
+                        "FROM local_board lb "
+                        "JOIN sprints s ON s.sprint_id = lb.sprint_id "
+                        "WHERE s.project_id = ? ORDER BY lb.created_at ASC",
+                        (project_id,),
+                    ).fetchall()
+                else:
+                    rows = con.execute(
+                        "SELECT task_id, summary, state, stack, priority, depends_on, parallel, sprint_id "
+                        "FROM local_board ORDER BY created_at ASC"
+                    ).fetchall()
             con.close()
 
             for task_id, summary, state, stack, priority, depends_on_raw, parallel, t_sprint in rows:
@@ -176,16 +240,22 @@ def get_local_board_data(sprint_id: str = "") -> dict:
 
 # ── Build data ─────────────────────────────────────────────────────────────────
 def build_data(sprint_id: str = "") -> dict:
-    yt         = get_local_board_data(sprint_id)
+    memory_store = MemoryStore()
+    project_context = resolve_project_context(memory_store)
+    runtime_state = memory_store.get_project_runtime_state(project_context.get("project_id", "")) if project_context.get("project_id") else {"last_sprint_id": "", "context": {}}
+    effective_sprint_id = sprint_id or runtime_state.get("last_sprint_id", "")
+    yt         = get_local_board_data(effective_sprint_id, project_context.get("project_id", ""))
     tc         = local_token_stats()
     endpoints  = local_certified_endpoints()
     schedule   = get_schedule()
     providers  = json.loads((BASE_DIR/"config"/"agents.json").read_text())["providers"]
-    active_stack = (yt.get("active_sprint") or {}).get("stack", "")
-    team_status = get_team_status()
+    active_sprint = yt.get("active_sprint") or {}
+    active_stack = active_sprint.get("stack", "")
+    active_team_id = active_sprint.get("team_id") or runtime_state.get("context", {}).get("team_id", "")
+    team_status = get_team_status_for(active_team_id)
     agents_cfg = get_agents_with_eligibility(
         stack_key=active_stack or None,
-        preset_name=team_status["active_preset"],
+        preset_name=active_team_id or None,
     )
 
     agents_out = []
@@ -202,7 +272,10 @@ def build_data(sprint_id: str = "") -> dict:
             "schedule":schedule,"sys_running":system_running(),
             "updated_at":datetime.now().strftime("%H:%M:%S"),
             "specs":load_specializations(),"providers":providers,
-            "alerts":alerts,"team":team_status,"active_stack":active_stack}
+            "alerts":alerts,"team":team_status,"active_stack":active_stack,
+            "project":project_context,"templates":list_project_templates(),
+            "runtime_state": runtime_state,
+            "available_teams": list_team_presets()}
 
 # ── Abrir terminal PowerShell con tail del log del agente ─────────────────────
 def open_terminal(agent_id: str) -> dict:
@@ -237,6 +310,12 @@ def render(data: dict) -> str:
     provs   = data["providers"]
     team    = data["team"]
     active_stack = data.get("active_stack") or ""
+    project = data["project"]
+    templates = data["templates"]
+    project_exists = bool(project.get("exists"))
+    active_team = get_team_preset(team.get("active_preset")) or {}
+    runtime_state = data.get("runtime_state", {})
+    available_teams = data.get("available_teams", [])
 
     def pct(s): return int(s["verified"]/s["total"]*100) if s["total"] else 0
     def badges(by_state):
@@ -252,7 +331,7 @@ def render(data: dict) -> str:
         p = pct(s)
         pre = f'<div style="color:#475569;font-size:11px;margin-top:5px">{prereqs[name]}</div>' if p==0 and name in prereqs else ""
         stack_html += f"""<div class="card">
-  <h2 style="color:{color}">SEGURO-{name} <span style="font-size:11px;color:#475569;font-weight:400">{labels[name]}</span></h2>
+  <h2 style="color:{color}">{project.get('project_id','PROJ')}-{name} <span style="font-size:11px;color:#475569;font-weight:400">{labels[name]}</span></h2>
   <div class="prog-wrap"><div class="prog-bar" style="width:{p}%;background:{color}"></div></div>
   <div class="pct">{p}% &nbsp;·&nbsp; {s['verified']}/{s['total']} tareas</div>
   <div style="margin-top:6px">{badges(s['by_state'])}</div>{pre}
@@ -315,7 +394,8 @@ def render(data: dict) -> str:
     for sp in sprints:
         sel  = ' selected' if sp["sprint_id"] == cur_sprint else ''
         status_mark = " ★" if sp["status"] == "active" else (" ⏸" if sp["status"] == "paused" else " ✓")
-        sprint_opts += f'<option value="{sp["sprint_id"]}"{sel}>{sp["sprint_id"]} — {sp["name"]}{status_mark}</option>'
+        team_suffix = f' · {sp.get("team_id","")}' if sp.get("team_id") else ""
+        sprint_opts += f'<option value="{sp["sprint_id"]}"{sel}>{sp["sprint_id"]} — {sp["name"]}{team_suffix}{status_mark}</option>'
     # Active sprint pause/resume controls
     if cur_sprint:
         active_sp_status = next((s["status"] for s in sprints if s["sprint_id"] == cur_sprint), "")
@@ -366,10 +446,24 @@ def render(data: dict) -> str:
                         for k,v in specs.items() if k not in ("project_manager","orchestrator"))
     prov_opts = "".join(f'<option value="{k}">{v["label"]}</option>' for k,v in provs.items())
     sched_st  = f"Programado {sched.get('start_time','?')} → {sched.get('stop_time','?')}" if sched.get("enabled") else "Sin programar"
-    preset_opts = "".join(
-        f'<option value="{preset["id"]}"{" selected" if preset["active"] else ""}>{preset["label"]}</option>'
-        for preset in team.get("presets", [])
+    template_opts = "".join(
+        f'<option value="{template["id"]}"{" selected" if template["id"] == project.get("template_id") else ""}>{template["label"]}</option>'
+        for template in templates
     )
+    workflow_states = " → ".join(project.get("workflow", {}).get("states", []))
+    provider_keys = ", ".join(sorted({provider.get("env_key", "") for provider in provs.values() if provider.get("env_key")}))
+    validation_html = "".join(
+        f'<div style="font-size:11px;color:#fca5a5">{error}</div>' for error in project.get("validation_errors", [])
+    )
+    active_git_dirs = project.get("git_dirs", {}) if project_exists else {}
+    back_value = (active_git_dirs.get("BACK", "") or "").replace('"', "&quot;")
+    web_bo_value = (active_git_dirs.get("WEB_BACKOFFICE", active_git_dirs.get("BO", "")) or "").replace('"', "&quot;")
+    web_landing_value = (active_git_dirs.get("WEB_LANDING", "") or "").replace('"', "&quot;")
+    android_value = (active_git_dirs.get("ANDROID", active_git_dirs.get("MOB", "")) or "").replace('"', "&quot;")
+    ios_value = (active_git_dirs.get("IOS", "") or "").replace('"', "&quot;")
+    flutter_value = (active_git_dirs.get("FLUTTER", "") or "").replace('"', "&quot;")
+    team_badge = active_team.get("label", "Sin equipo asignado")
+    team_scope = " / ".join(item for item in [active_team.get("stack_key", active_stack), active.get("substack", "")] if item)
 
     sys_run = data["sys_running"]
     raw_alerts = data.get("alerts", [])
@@ -473,7 +567,7 @@ select,input[type=text]{{width:100%;background:#0f172a;border:1px solid #334155;
 
 <div class="topbar">
   <h1>VeloxIq</h1>
-  <span class="subtitle">SeguroAuto &nbsp;·&nbsp; {data['updated_at']} &nbsp;·&nbsp; <span id="cd">30</span>s</span>
+  <span class="subtitle">{project.get('name','Proyecto')} &nbsp;·&nbsp; {project.get('template', {}).get('label', project.get('template_id','template'))} &nbsp;·&nbsp; {data['updated_at']} &nbsp;·&nbsp; <span id="cd">30</span>s</span>
   <button class="btn {'btn-red' if sys_run else 'btn-green'}" onclick="systemToggle()">
     {'Apagar' if sys_run else 'Encender'}
   </button>
@@ -485,10 +579,9 @@ select,input[type=text]{{width:100%;background:#0f172a;border:1px solid #334155;
 <div class="section" style="margin-bottom:12px">
   <div class="section-title">Equipo activo</div>
   <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-    <select id="preset-sel" onchange="changePreset(this.value)" style="max-width:240px">
-      {preset_opts}
-    </select>
-    <span style="font-size:11px;color:#64748b">Stack actual: {active_stack or 'ALL'}</span>
+    <span class="tag" style="background:#0f766e;font-size:11px;padding:4px 8px">{team_badge}</span>
+    <span style="font-size:11px;color:#64748b">Sprint: {active.get('sprint_id') or 'sin sprint seleccionado'}</span>
+    <span style="font-size:11px;color:#64748b">Scope: {team_scope or 'sin scope'}</span>
     <button class="btn btn-sm btn-outline" onclick="toggleStack('BACK', true)">BACK on</button>
     <button class="btn btn-sm btn-outline" onclick="toggleStack('BACK', false)">BACK off</button>
     <button class="btn btn-sm btn-outline" onclick="toggleStack('BO', true)">BO on</button>
@@ -496,6 +589,19 @@ select,input[type=text]{{width:100%;background:#0f172a;border:1px solid #334155;
     <button class="btn btn-sm btn-outline" onclick="toggleStack('MOB', true)">MOB on</button>
     <button class="btn btn-sm btn-outline" onclick="toggleStack('MOB', false)">MOB off</button>
   </div>
+</div>
+
+<div class="section" style="margin-bottom:12px">
+  <div class="section-title">Proyecto activo</div>
+  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+    <span style="font-size:12px;color:#e2e8f0">{project.get('project_id','Sin proyecto')}</span>
+    <select id="project-template-sel" onchange="updateProjectTemplate(this.value)" style="max-width:260px" {'disabled' if not project_exists else ''}>
+      {template_opts}
+    </select>
+  </div>
+  <div style="font-size:11px;color:#94a3b8">{project.get('template', {}).get('description', '')}</div>
+  <div style="font-size:10px;color:#64748b;margin-top:6px">Workflow: {workflow_states}</div>
+  {validation_html}
 </div>
 
 <!-- Quick scheduler controls under topbar -->
@@ -556,7 +662,7 @@ select,input[type=text]{{width:100%;background:#0f172a;border:1px solid #334155;
   <div class="modal">
     <h3>Agregar agente</h3>
     <div class="fg"><label>Tipo</label>
-      <select id="nt"><option value="dev">Dev</option><option value="qa">QA</option></select></div>
+      <select id="nt" onchange="refreshSpecializationOptions()"><option value="dev">Dev</option><option value="qa">QA</option></select></div>
     <div class="fg"><label>Especialización</label>
       <select id="ns">{spec_opts}</select></div>
     <div class="fg"><label>Proveedor</label>
@@ -593,6 +699,30 @@ select,input[type=text]{{width:100%;background:#0f172a;border:1px solid #334155;
         <label>Descripcion (opcional)</label>
         <input type="text" id="new-proj-desc" placeholder="Detalles del proyecto">
       </div>
+      <div class="fg">
+        <label>Repo Backend</label>
+        <input type="text" id="new-proj-back" placeholder="C:\\Users\\...\\repos\\backend">
+      </div>
+      <div class="fg">
+        <label>Repo Front Web - Backoffice</label>
+        <input type="text" id="new-proj-web-bo" placeholder="C:\\Users\\...\\repos\\backoffice">
+      </div>
+      <div class="fg">
+        <label>Repo Front Web - Landing (opcional)</label>
+        <input type="text" id="new-proj-web-landing" placeholder="C:\\Users\\...\\repos\\landing">
+      </div>
+      <div class="fg">
+        <label>Repo Mobile - Android</label>
+        <input type="text" id="new-proj-android" placeholder="C:\\Users\\...\\repos\\android">
+      </div>
+      <div class="fg">
+        <label>Repo Mobile - iOS (opcional)</label>
+        <input type="text" id="new-proj-ios" placeholder="C:\\Users\\...\\repos\\ios">
+      </div>
+      <div class="fg">
+        <label>Repo Mobile - Flutter (opcional)</label>
+        <input type="text" id="new-proj-flutter" placeholder="C:\\Users\\...\\repos\\flutter">
+      </div>
       <button class="btn btn-green" onclick="createProject()" style="width:100%">Crear Proyecto</button>
     </div>
 
@@ -601,39 +731,35 @@ select,input[type=text]{{width:100%;background:#0f172a;border:1px solid #334155;
       <h4 style="font-size:13px;color:#94a3b8;margin-bottom:10px">DIRECTORIOS GIT (Rutas locales)</h4>
       <div class="fg">
         <label>BACK (FastAPI · PostgreSQL)</label>
-        <input type="text" id="git-back" placeholder="C:\\Users\\...\\repos\\backend">
+        <input type="text" id="git-back" value="{back_value}" placeholder="C:\\Users\\...\\repos\\backend">
       </div>
       <div class="fg">
-        <label>BO (Next.js · shadcn/ui)</label>
-        <input type="text" id="git-bo" placeholder="C:\\Users\\...\\repos\\backoffice">
+        <label>Front Web - Backoffice</label>
+        <input type="text" id="git-web-bo" value="{web_bo_value}" placeholder="C:\\Users\\...\\repos\\backoffice">
       </div>
       <div class="fg">
-        <label>MOB (Android · Compose)</label>
-        <input type="text" id="git-mob" placeholder="C:\\Users\\...\\repos\\mobile">
+        <label>Front Web - Landing (opcional)</label>
+        <input type="text" id="git-web-landing" value="{web_landing_value}" placeholder="C:\\Users\\...\\repos\\landing">
+      </div>
+      <div class="fg">
+        <label>Mobile - Android</label>
+        <input type="text" id="git-android" value="{android_value}" placeholder="C:\\Users\\...\\repos\\android">
+      </div>
+      <div class="fg">
+        <label>Mobile - iOS (opcional)</label>
+        <input type="text" id="git-ios" value="{ios_value}" placeholder="C:\\Users\\...\\repos\\ios">
+      </div>
+      <div class="fg">
+        <label>Mobile - Flutter (opcional)</label>
+        <input type="text" id="git-flutter" value="{flutter_value}" placeholder="C:\\Users\\...\\repos\\flutter">
       </div>
       <button class="btn btn-green" onclick="saveGitDirs()" style="width:100%">Guardar Directorios</button>
     </div>
 
-    <!-- TAB 3: DIRECTIVAS DEL PROYECTO -->
     <div style="margin-bottom:20px">
-      <h4 style="font-size:13px;color:#94a3b8;margin-bottom:10px">DIRECTIVAS (Reglas del proyecto)</h4>
-      <div class="fg">
-        <label>Estrategia de Merge</label>
-        <select id="directive-merge" style="width:100%">
-          <option value="squash">Squash (por defecto)</option>
-          <option value="merge-commit">Merge Commit</option>
-          <option value="rebase">Rebase</option>
-        </select>
-      </div>
-      <div class="fg">
-        <label>Prefijo de Feature</label>
-        <input type="text" id="directive-feature-prefix" placeholder="FEAT- o VEL- o custom">
-      </div>
-      <div class="fg">
-        <label>Rama de Desarrollo</label>
-        <input type="text" id="directive-dev-branch" placeholder="develop (por defecto)">
-      </div>
-      <button class="btn btn-green" onclick="saveDirectives()" style="width:100%">Guardar Directivas</button>
+      <h4 style="font-size:13px;color:#94a3b8;margin-bottom:10px">MODELOS / API KEYS</h4>
+      <div style="font-size:11px;color:#94a3b8">Providers soportados por entorno: {provider_keys}</div>
+      <div style="font-size:10px;color:#64748b;margin-top:6px">Las API keys se leen desde variables de entorno. Esta seccion es informativa.</div>
     </div>
 
     <div class="modal-actions">
@@ -656,11 +782,28 @@ select,input[type=text]{{width:100%;background:#0f172a;border:1px solid #334155;
     </div>
     <div class="fg">
       <label>Stack</label>
-      <select id="sprint-stack">
+      <select id="sprint-stack" onchange="refreshSprintTeams()">
         <option value="BACK">BACK (FastAPI)</option>
         <option value="BO">BO (Next.js)</option>
         <option value="MOB">MOB (Android)</option>
       </select>
+    </div>
+    <div class="fg">
+      <label>Substack</label>
+      <select id="sprint-substack" onchange="refreshSprintTeams()">
+        <option value="">General</option>
+        <option value="api">API</option>
+        <option value="db">DB</option>
+        <option value="backoffice">Backoffice</option>
+        <option value="landing">Landing</option>
+        <option value="android">Android</option>
+        <option value="ios">iOS</option>
+        <option value="flutter">Flutter</option>
+      </select>
+    </div>
+    <div class="fg">
+      <label>Equipo asignado</label>
+      <select id="sprint-team"></select>
     </div>
     <div class="fg">
       <label style="display:flex;align-items:center;gap:7px">
@@ -681,10 +824,14 @@ select,input[type=text]{{width:100%;background:#0f172a;border:1px solid #334155;
 <script>
 const PROVS = {json.dumps(provs)};
 const SPECS = {json.dumps(specs)};
+const TEAM_PRESETS = {json.dumps(available_teams)};
+const ACTIVE_PROJECT_ID = {json.dumps(project.get("project_id", ""))};
+const ACTIVE_SPRINT_ID = {json.dumps(active.get("sprint_id", ""))};
+const ACTIVE_TEAM_ID = {json.dumps(active_team.get("id", ""))};
 
 setInterval(()=>{{let c=document.getElementById('cd');c.textContent=+c.textContent-1;if(+c.textContent<=0)location.reload();}},1000);
 
-async function systemToggle(){{await fetch('/api/system/{("stop" if sys_run else "start")}',{{method:'POST'}});location.reload();}}
+async function systemToggle(){{await fetch('/api/system/{("stop" if sys_run else "start")}',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{team_id:ACTIVE_TEAM_ID}})}});location.reload();}}
 
 function toggleLog(id){{
   const p=document.getElementById('log-'+id);
@@ -703,12 +850,6 @@ async function toggleAgentEnabled(id,enabled){{
   location.reload();
 }}
 
-async function changePreset(preset){{
-  await fetch('/api/team/preset',{{method:'POST',headers:{{'Content-Type':'application/json'}},
-    body:JSON.stringify({{preset}})}});
-  location.reload();
-}}
-
 async function toggleStack(stack, enabled){{
   await fetch('/api/team/stack',{{method:'POST',headers:{{'Content-Type':'application/json'}},
     body:JSON.stringify({{stack_key:stack, enabled}})}});
@@ -717,7 +858,10 @@ async function toggleStack(stack, enabled){{
 
 async function removeAgent(id){{
   if(!confirm('¿Eliminar agente '+id+'?'))return;
-  await fetch('/api/agents/'+id,{{method:'DELETE'}});location.reload();
+  const r=await fetch('/api/agents/'+id,{{method:'DELETE'}});
+  const d=await r.json();
+  if(!d.ok){{alert('Error: '+(d.error||''));return;}}
+  location.reload();
 }}
 
 function updModels(){{
@@ -726,6 +870,31 @@ function updModels(){{
   s.innerHTML=(PROVS[p]?.models||[]).map(m=>`<option value="${{m}}">${{m}}</option>`).join('');
 }}
 updModels();
+
+function refreshSpecializationOptions(){{
+  const type=document.getElementById('nt')?.value||'dev';
+  const select=document.getElementById('ns');
+  const activeTeam=TEAM_PRESETS.find(team=>team.id===ACTIVE_TEAM_ID) || null;
+  const allowedSkills=new Set(activeTeam?.skills||[]);
+  const options=Object.entries(SPECS).filter(([key, spec])=>{{
+    if(type==='qa')return spec.role==='qa';
+    if(type!=='dev')return spec.role===type;
+    if(!ACTIVE_TEAM_ID)return spec.role==='developer';
+    return spec.role==='developer' && allowedSkills.has(key);
+  }});
+  select.innerHTML=options.map(([key, spec])=>`<option value="${{key}}">${{spec.label}} (${{spec.stack||'ALL'}})</option>`).join('');
+}}
+refreshSpecializationOptions();
+
+function refreshSprintTeams(){{
+  const stack=document.getElementById('sprint-stack')?.value||'';
+  const substack=document.getElementById('sprint-substack')?.value||'';
+  const sel=document.getElementById('sprint-team');
+  if(!sel)return;
+  const teams=TEAM_PRESETS.filter(team=>((team.stack_key||'')===stack||!stack) && (!substack || !(team.substacks||[]).length || (team.substacks||[]).includes(substack)));
+  sel.innerHTML=teams.map(team=>`<option value="${{team.id}}">${{team.label}}${{team.substacks?.length ? ' · '+team.substacks.join(', ') : ''}}</option>`).join('');
+}}
+refreshSprintTeams();
 
 async function addAgent(){{
   const spec=document.getElementById('ns').value;
@@ -736,9 +905,10 @@ async function addAgent(){{
   const role=SPECS[spec]?.role||(type==='dev'?'developer':type);
   const stack=SPECS[spec]?.stack||'backend';
   const stack_key=SPECS[spec]?.stack_key||'BACK';
+  if(type==='dev' && (!ACTIVE_PROJECT_ID || !ACTIVE_SPRINT_ID || !ACTIVE_TEAM_ID)){{alert('Los nuevos developers solo pueden crearse dentro de un sprint con equipo asignado.');return;}}
   const id=type+'_'+spec+'_'+Date.now().toString(36);
   const r=await fetch('/api/agents',{{method:'POST',headers:{{'Content-Type':'application/json'}},
-    body:JSON.stringify({{id,name:name||spec,type,role,stack,stack_key,specialization:spec,provider:prov,model}})}});
+    body:JSON.stringify({{id,name:name||spec,type,role,stack,stack_key,specialization:spec,provider:prov,model,project_id:ACTIVE_PROJECT_ID,sprint_id:ACTIVE_SPRINT_ID,team_id:ACTIVE_TEAM_ID}})}});
   const d=await r.json();
   if(d.ok){{document.getElementById('mbg').classList.remove('open');location.reload();}}
   else alert('Error: '+d.error);
@@ -764,6 +934,9 @@ async function saveSchedule(){{
 }}
 
 function filterSprint(sprintId){{
+  if(ACTIVE_PROJECT_ID){{
+    fetch('/api/projects/runtime',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{project_id:ACTIVE_PROJECT_ID,last_sprint_id:sprintId}})}}).catch(()=>null);
+  }}
   const url=new URL(window.location.href);
   if(sprintId)url.searchParams.set('sprint',sprintId);
   else url.searchParams.delete('sprint');
@@ -834,24 +1007,47 @@ async function loadProjectList(){{
 }}
 
 async function selectProject(projectId){{
-  // TODO: Switch to project in backend
-  alert('Proyecto cambiado a: '+projectId);
-  location.reload();
+  const r=await fetch('/api/projects/active',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+    body:JSON.stringify({{project_id:projectId,previous_project_id:ACTIVE_PROJECT_ID,previous_sprint_id:(document.getElementById('sprint-sel')?.value||ACTIVE_SPRINT_ID)}})}});
+  const d=await r.json();
+  if(!d.ok){{alert('Error: '+(d.error||''));return;}}
+  window.location.href=d.redirect_url||window.location.href.split('?')[0];
 }}
 
 async function createProject(){{
   const id=document.getElementById('new-proj-id').value.trim();
   const name=document.getElementById('new-proj-name').value.trim();
   const desc=document.getElementById('new-proj-desc').value.trim();
+  const template_id=document.getElementById('project-template-sel').value;
+  const git_dirs={{}};
+  const back=document.getElementById('new-proj-back').value.trim();
+  const webBo=document.getElementById('new-proj-web-bo').value.trim();
+  const webLanding=document.getElementById('new-proj-web-landing').value.trim();
+  const android=document.getElementById('new-proj-android').value.trim();
+  const ios=document.getElementById('new-proj-ios').value.trim();
+  const flutter=document.getElementById('new-proj-flutter').value.trim();
+  if(back) git_dirs.BACK=back;
+  if(webBo) git_dirs.WEB_BACKOFFICE=webBo;
+  if(webLanding) git_dirs.WEB_LANDING=webLanding;
+  if(android) git_dirs.ANDROID=android;
+  if(ios) git_dirs.IOS=ios;
+  if(flutter) git_dirs.FLUTTER=flutter;
   if(!id||!name){{alert('ID y Nombre son requeridos');return;}}
+  if(!back||(!webBo&&!webLanding)||(!android&&!ios&&!flutter)){{alert('Proyecto requiere al menos Backend, Front Web y Mobile');return;}}
   const r=await fetch('/api/projects/create',{{method:'POST',headers:{{'Content-Type':'application/json'}},
-    body:JSON.stringify({{project_id:id,name,description:desc,git_dirs:{{}}}})}});
+    body:JSON.stringify({{project_id:id,name,description:desc,git_dirs,template_id}})}});
   const d=await r.json();
   if(d.ok){{
     alert('Proyecto '+id+' creado correctamente');
     document.getElementById('new-proj-id').value='';
     document.getElementById('new-proj-name').value='';
     document.getElementById('new-proj-desc').value='';
+    document.getElementById('new-proj-back').value='';
+    document.getElementById('new-proj-web-bo').value='';
+    document.getElementById('new-proj-web-landing').value='';
+    document.getElementById('new-proj-android').value='';
+    document.getElementById('new-proj-ios').value='';
+    document.getElementById('new-proj-flutter').value='';
     loadProjectList();
     location.reload();
   }}
@@ -860,57 +1056,57 @@ async function createProject(){{
 
 async function saveGitDirs(){{
   const back=document.getElementById('git-back').value.trim();
-  const bo=document.getElementById('git-bo').value.trim();
-  const mob=document.getElementById('git-mob').value.trim();
+  const webBo=document.getElementById('git-web-bo').value.trim();
+  const webLanding=document.getElementById('git-web-landing').value.trim();
+  const android=document.getElementById('git-android').value.trim();
+  const ios=document.getElementById('git-ios').value.trim();
+  const flutter=document.getElementById('git-flutter').value.trim();
   const git_dirs={{}};
   if(back) git_dirs.BACK=back;
-  if(bo) git_dirs.BO=bo;
-  if(mob) git_dirs.MOB=mob;
-  if(!Object.keys(git_dirs).length){{alert('Al menos una ruta requerida');return;}}
+  if(webBo) git_dirs.WEB_BACKOFFICE=webBo;
+  if(webLanding) git_dirs.WEB_LANDING=webLanding;
+  if(android) git_dirs.ANDROID=android;
+  if(ios) git_dirs.IOS=ios;
+  if(flutter) git_dirs.FLUTTER=flutter;
+  if(!ACTIVE_PROJECT_ID){{alert('Debes seleccionar un proyecto');return;}}
+  if(!back||(!webBo&&!webLanding)||(!android&&!ios&&!flutter)){{alert('Debes configurar al menos Backend, Front Web y Mobile');return;}}
 
-  const r=await fetch('/api/projects/SEGURO/config',{{method:'POST',headers:{{'Content-Type':'application/json'}},
-    body:JSON.stringify({{git_dirs,directives:{{}}}})}});
+  const r=await fetch('/api/projects/'+ACTIVE_PROJECT_ID+'/config',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+    body:JSON.stringify({{git_dirs}})}});
   const d=await r.json();
   if(d.ok){{
     alert('Directorios Git guardados');
-    document.getElementById('git-back').value='';
-    document.getElementById('git-bo').value='';
-    document.getElementById('git-mob').value='';
+    location.reload();
   }}
   else alert('Error: '+(d.error||''));
 }}
 
-async function saveDirectives(){{
-  const merge=document.getElementById('directive-merge').value;
-  const prefix=document.getElementById('directive-feature-prefix').value.trim();
-  const branch=document.getElementById('directive-dev-branch').value.trim();
-
-  const directives={{}};
-  if(merge) directives['merge-strategy']=merge;
-  if(prefix) directives['feature-prefix']=prefix;
-  if(branch) directives['dev-branch']=branch;
-
-  const r=await fetch('/api/projects/SEGURO/config',{{method:'POST',headers:{{'Content-Type':'application/json'}},
-    body:JSON.stringify({{git_dirs:{{}},directives}})}});
+async function updateProjectTemplate(template_id){{
+  if(!ACTIVE_PROJECT_ID){{alert('Debes seleccionar un proyecto');return;}}
+  const r=await fetch('/api/projects/'+ACTIVE_PROJECT_ID+'/template',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+    body:JSON.stringify({{template_id}})}});
   const d=await r.json();
-  if(d.ok){{
-    alert('Directivas guardadas');
-  }}
-  else alert('Error: '+(d.error||''));
+  if(!d.ok){{alert('Error: '+(d.error||''));return;}}
+  location.reload();
 }}
 
 function openSprintModal(){{
+  if(!ACTIVE_PROJECT_ID){{alert('Debes crear o seleccionar un proyecto antes de crear un sprint');return;}}
   document.getElementById('sprint-modal-bg').classList.add('open');
 }}
 function closeSprintModal(){{
   document.getElementById('sprint-modal-bg').classList.remove('open');
 }}
 async function createSprint(){{
+  if(!ACTIVE_PROJECT_ID){{alert('Debes seleccionar o crear un proyecto antes de crear un sprint');return;}}
   const id=document.getElementById('sprint-id').value.trim();
   const name=document.getElementById('sprint-name').value.trim();
   const stack=document.getElementById('sprint-stack').value;
+  const substack=document.getElementById('sprint-substack').value;
+  const team_id=document.getElementById('sprint-team').value;
   const tasksJson=document.getElementById('sprint-tasks').value.trim();
   if(!id||!name){{alert('Sprint ID y Nombre requeridos');return;}}
+  if(!team_id){{alert('Debes asignar un equipo al sprint');return;}}
   let tasks=[];
   try{{
     tasks=tasksJson?JSON.parse(tasksJson):[];
@@ -919,7 +1115,7 @@ async function createSprint(){{
     return;
   }}
   const r=await fetch('/api/sprints/create',{{method:'POST',headers:{{'Content-Type':'application/json'}},
-    body:JSON.stringify({{sprint_id:id,name,stack,tasks}})}});
+    body:JSON.stringify({{project_id:ACTIVE_PROJECT_ID,sprint_id:id,name,stack,substack,team_id,tasks}})}});
   const d=await r.json();
   if(d.ok){{alert('Sprint '+id+' creado con '+d.result.tasks_created+' tareas');closeSprintModal();location.reload();}}
   else alert('Error: '+(d.error||''));
@@ -967,14 +1163,34 @@ class Handler(BaseHTTPRequestHandler):
             return
         n=int(self.headers.get("Content-Length",0))
         body=json.loads(self.rfile.read(n)) if n else {}
-        if p=="/api/system/start":     self._json(start_all())
+        if p=="/api/system/start":     self._json(start_all(body.get("team_id") or None))
         elif p=="/api/system/stop":    self._json(stop_all())
         elif p.endswith("/start"):      self._json(start_agent(p.split("/")[3]))
         elif p.endswith("/stop"):       self._json(stop_agent(p.split("/")[3]))
         elif p.endswith("/terminal"):   self._json(open_terminal(p.split("/")[3]))
         elif p.endswith("/enabled"):    self._json(set_agent_enabled(p.split("/")[3], bool(body.get("enabled", True))))
-        elif p=="/api/agents":         self._json(add_agent(body))
-        elif p=="/api/team/preset":    self._json(set_active_preset(body.get("preset", "")))
+        elif p=="/api/agents":
+            try:
+                if body.get("role") == "developer":
+                    sprint = MemoryStore().sprint_get(body.get("sprint_id", ""))
+                    if not sprint:
+                        self._json({"ok": False, "error": "Debes seleccionar un sprint valido para agregar developers."}, 400)
+                        return
+                    if sprint.get("project_id") != body.get("project_id"):
+                        self._json({"ok": False, "error": "El sprint no pertenece al proyecto activo."}, 400)
+                        return
+                    if sprint.get("team_id") != body.get("team_id"):
+                        self._json({"ok": False, "error": "El team del sprint no coincide con el agent solicitado."}, 400)
+                        return
+                    ok, error = validate_agent_for_team(body, body.get("team_id"))
+                    if not ok:
+                        self._json({"ok": False, "error": error}, 400)
+                        return
+                    body["removable"] = False
+                    body["locked_to_team"] = True
+                self._json(add_agent(body))
+            except Exception as e:
+                self._json({"ok": False, "error": str(e)}, 400)
         elif p=="/api/team/stack":     self._json(set_agents_enabled_for_stack(body.get("stack_key", ""), bool(body.get("enabled", True))))
         elif p=="/api/schedule":       save_schedule(body);self._json({"ok":True})
         elif p.startswith("/api/sprint/") and p.endswith("/pause"):
@@ -991,24 +1207,97 @@ class Handler(BaseHTTPRequestHandler):
             from app_core.memory_store import MemoryStore
             self._json(MemoryStore().project_list())
         elif p == "/api/projects/create":
-            from app_core.memory_store import MemoryStore
             try:
-                MemoryStore().project_create(
+                preview = _preview_project_context(
+                    project_id=body.get("project_id", ""),
+                    name=body.get("name", ""),
+                    description=body.get("description", ""),
+                    template_id=body.get("template_id", "software_delivery_default"),
+                    git_dirs=body.get("git_dirs", {}),
+                    directives={},
+                )
+                if preview["validation_errors"]:
+                    self._json({"ok": False, "error": "; ".join(preview["validation_errors"])}, 400)
+                    return
+                store = MemoryStore()
+                if store.get_project(body.get("project_id", "")):
+                    self._json({"ok": False, "error": "El proyecto ya existe."}, 400)
+                    return
+                store.project_create(
                     body.get("project_id", ""),
                     body.get("name", ""),
                     body.get("description", ""),
-                    body.get("git_dirs", {})
+                    body.get("git_dirs", {}),
+                    body.get("template_id", "software_delivery_default"),
+                )
+                set_active_project_id(body.get("project_id", ""))
+                self._json({"ok": True})
+            except Exception as e:
+                self._json({"ok": False, "error": str(e)}, 400)
+        elif p == "/api/projects/active":
+            try:
+                store = MemoryStore()
+                project_id = body.get("project_id", "")
+                if not store.get_project(project_id):
+                    self._json({"ok": False, "error": "El proyecto no existe."}, 400)
+                    return
+                previous_project_id = body.get("previous_project_id", "")
+                previous_sprint_id = body.get("previous_sprint_id", "")
+                if previous_project_id:
+                    store.save_project_runtime_state(previous_project_id, last_sprint_id=previous_sprint_id)
+                set_active_project_id(project_id)
+                runtime_state = store.get_project_runtime_state(project_id)
+                redirect_url = f"/?sprint={runtime_state.get('last_sprint_id')}" if runtime_state.get("last_sprint_id") else "/"
+                self._json({"ok": True, "redirect_url": redirect_url})
+            except Exception as e:
+                self._json({"ok": False, "error": str(e)}, 400)
+        elif p == "/api/projects/runtime":
+            try:
+                MemoryStore().save_project_runtime_state(
+                    body.get("project_id", ""),
+                    last_sprint_id=body.get("last_sprint_id", ""),
+                    context={"team_id": body.get("team_id", "")},
                 )
                 self._json({"ok": True})
             except Exception as e:
                 self._json({"ok": False, "error": str(e)}, 400)
         elif p.startswith("/api/projects/") and p.endswith("/config"):
-            from app_core.memory_store import MemoryStore
             project_id = p.split("/")[3]
             try:
-                MemoryStore().project_update_git_dirs(project_id, body.get("git_dirs", {}))
-                for key, value in body.get("directives", {}).items():
-                    MemoryStore().project_set_directive(project_id, key, value)
+                store = MemoryStore()
+                current = require_project_context(store, project_id)
+                preview = _preview_project_context(
+                    project_id=project_id,
+                    name=current.get("name", project_id),
+                    description=current.get("description", ""),
+                    template_id=current.get("template_id", "software_delivery_default"),
+                    git_dirs=body.get("git_dirs", {}),
+                    directives=current.get("directives", {}),
+                )
+                if preview["validation_errors"]:
+                    self._json({"ok": False, "error": "; ".join(preview["validation_errors"])}, 400)
+                    return
+                store.project_update_git_dirs(project_id, body.get("git_dirs", {}))
+                self._json({"ok": True})
+            except Exception as e:
+                self._json({"ok": False, "error": str(e)}, 400)
+        elif p.startswith("/api/projects/") and p.endswith("/template"):
+            project_id = p.split("/")[3]
+            try:
+                store = MemoryStore()
+                current = require_project_context(store, project_id)
+                preview = _preview_project_context(
+                    project_id=project_id,
+                    name=current.get("name", project_id),
+                    description=current.get("description", ""),
+                    template_id=body.get("template_id", "software_delivery_default"),
+                    git_dirs=current.get("git_dirs", {}),
+                    directives=current.get("directives", {}),
+                )
+                if preview["validation_errors"]:
+                    self._json({"ok": False, "error": "; ".join(preview["validation_errors"])}, 400)
+                    return
+                store.project_set_template(project_id, body.get("template_id", "software_delivery_default"))
                 self._json({"ok": True})
             except Exception as e:
                 self._json({"ok": False, "error": str(e)}, 400)
@@ -1016,14 +1305,28 @@ class Handler(BaseHTTPRequestHandler):
             from app_core.memory_store import MemoryStore
             from app_core.sprint_manager import create_sprint_from_plan
             try:
+                store = MemoryStore()
+                project_context = require_project_context(store, body.get("project_id"))
+                stack = resolve_stack_for_project(project_context, body.get("stack", "BACK"))
+                team = get_team_preset(body.get("team_id"))
+                if not team:
+                    self._json({"ok": False, "error": "Debes asignar un equipo valido al sprint."}, 400)
+                    return
                 # Expect: {sprint_id, name, stack, tasks: [{id, summary, depends_on, parallel}]}
                 plan = {
                     "sprint_id": body.get("sprint_id", ""),
                     "name": body.get("name", ""),
-                    "stack": body.get("stack", "BACK"),
+                    "project_id": project_context["project_id"],
+                    "stack": stack,
+                    "substack": body.get("substack", ""),
+                    "team_id": body.get("team_id", ""),
+                    "team_snapshot": team,
                     "tasks": body.get("tasks", [])
                 }
-                result = create_sprint_from_plan(plan, MemoryStore())
+                result = create_sprint_from_plan(plan, store)
+                for agent in get_agents_with_eligibility(stack_key=stack, preset_name=team["id"]):
+                    if agent.get("role") == "developer":
+                        update_agent(agent["id"], {"removable": False, "team_id": team["id"]})
                 global _board_cache_ts
                 _board_cache_ts = 0
                 self._json({"ok": True, "sprint_id": plan["sprint_id"], "result": result})

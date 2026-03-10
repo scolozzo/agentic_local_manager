@@ -48,6 +48,10 @@ class MemoryStore:
                 sprint_id TEXT PRIMARY KEY,
                 name TEXT,
                 stack TEXT,
+                project_id TEXT DEFAULT '',
+                team_id TEXT DEFAULT '',
+                substack TEXT DEFAULT '',
+                team_snapshot TEXT DEFAULT '{}',
                 status TEXT DEFAULT 'active',
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                 started_at TEXT,
@@ -63,6 +67,7 @@ class MemoryStore:
                 project_id TEXT PRIMARY KEY,
                 name TEXT,
                 description TEXT,
+                template_id TEXT DEFAULT 'software_delivery_default',
                 git_dirs TEXT,
                 directives TEXT DEFAULT '{}',
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -81,9 +86,34 @@ class MemoryStore:
                 stack TEXT,
                 certified_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
+            CREATE TABLE IF NOT EXISTS project_runtime_state (
+                project_id TEXT PRIMARY KEY,
+                last_sprint_id TEXT DEFAULT '',
+                context_json TEXT DEFAULT '{}',
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
             """
         )
-        con.commit()
+        try:
+            con.execute("ALTER TABLE projects ADD COLUMN template_id TEXT DEFAULT 'software_delivery_default'")
+            con.commit()
+        except sqlite3.OperationalError:
+            pass
+        try:
+            con.execute("ALTER TABLE sprints ADD COLUMN project_id TEXT DEFAULT ''")
+            con.commit()
+        except sqlite3.OperationalError:
+            pass
+        for column_name, ddl in (
+            ("team_id", "ALTER TABLE sprints ADD COLUMN team_id TEXT DEFAULT ''"),
+            ("substack", "ALTER TABLE sprints ADD COLUMN substack TEXT DEFAULT ''"),
+            ("team_snapshot", "ALTER TABLE sprints ADD COLUMN team_snapshot TEXT DEFAULT '{}'"),
+        ):
+            try:
+                con.execute(ddl)
+                con.commit()
+            except sqlite3.OperationalError:
+                pass
         con.close()
 
     def board_create_task(self, task_id: str, summary: str, description: str = "", state: str = "Todo",
@@ -227,11 +257,32 @@ class MemoryStore:
         con.close()
         return [dict(row) for row in rows]
 
+    def sprint_get(self, sprint_id: str) -> dict | None:
+        con = self._connect()
+        row = con.execute("SELECT * FROM sprints WHERE sprint_id = ?", (sprint_id,)).fetchone()
+        con.close()
+        return dict(row) if row else None
+
     def sprint_get_active(self):
         con = self._connect()
         row = con.execute("SELECT * FROM sprints WHERE status = 'active' ORDER BY created_at DESC LIMIT 1").fetchone()
         con.close()
         return dict(row) if row else None
+
+    def sprint_set_project(self, sprint_id: str, project_id: str) -> None:
+        con = self._connect()
+        con.execute("UPDATE sprints SET project_id = ? WHERE sprint_id = ?", (project_id, sprint_id))
+        con.commit()
+        con.close()
+
+    def sprint_set_team(self, sprint_id: str, team_id: str, substack: str = "", team_snapshot: dict | None = None) -> None:
+        con = self._connect()
+        con.execute(
+            "UPDATE sprints SET team_id = ?, substack = ?, team_snapshot = ? WHERE sprint_id = ?",
+            (team_id, substack, json.dumps(team_snapshot or {}), sprint_id),
+        )
+        con.commit()
+        con.close()
 
     def sprint_pause(self, sprint_id: str) -> str:
         con = self._connect()
@@ -251,13 +302,42 @@ class MemoryStore:
         con = self._connect()
         rows = con.execute("SELECT * FROM projects ORDER BY created_at DESC").fetchall()
         con.close()
-        return [dict(row) for row in rows]
+        projects = []
+        for row in rows:
+            item = dict(row)
+            item["git_dirs"] = json.loads(item.get("git_dirs") or "{}")
+            item["directives"] = json.loads(item.get("directives") or "{}")
+            item.setdefault("template_id", "software_delivery_default")
+            projects.append(item)
+        return projects
 
-    def project_create(self, project_id: str, name: str, description: str, git_dirs: dict) -> None:
+    def get_project(self, project_id: str) -> dict | None:
+        return next((project for project in self.project_list() if project.get("project_id") == project_id), None)
+
+    def get_project_runtime_state(self, project_id: str) -> dict:
+        con = self._connect()
+        row = con.execute("SELECT * FROM project_runtime_state WHERE project_id = ?", (project_id,)).fetchone()
+        con.close()
+        if not row:
+            return {"project_id": project_id, "last_sprint_id": "", "context": {}}
+        item = dict(row)
+        item["context"] = json.loads(item.get("context_json") or "{}")
+        return item
+
+    def save_project_runtime_state(self, project_id: str, last_sprint_id: str = "", context: dict | None = None) -> None:
         con = self._connect()
         con.execute(
-            "INSERT OR REPLACE INTO projects (project_id, name, description, git_dirs, updated_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)",
-            (project_id, name, description, json.dumps(git_dirs)),
+            "INSERT OR REPLACE INTO project_runtime_state (project_id, last_sprint_id, context_json, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
+            (project_id, last_sprint_id, json.dumps(context or {})),
+        )
+        con.commit()
+        con.close()
+
+    def project_create(self, project_id: str, name: str, description: str, git_dirs: dict, template_id: str = "software_delivery_default") -> None:
+        con = self._connect()
+        con.execute(
+            "INSERT OR REPLACE INTO projects (project_id, name, description, template_id, git_dirs, updated_at) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
+            (project_id, name, description, template_id, json.dumps(git_dirs)),
         )
         con.commit()
         con.close()
@@ -267,8 +347,8 @@ class MemoryStore:
         row = con.execute("SELECT directives FROM projects WHERE project_id = ?", (project_id,)).fetchone()
         directives = row["directives"] if row else "{}"
         con.execute(
-            "INSERT OR REPLACE INTO projects (project_id, name, description, git_dirs, directives, updated_at) VALUES (?, COALESCE((SELECT name FROM projects WHERE project_id = ?), ?), COALESCE((SELECT description FROM projects WHERE project_id = ?), ''), ?, ?, CURRENT_TIMESTAMP)",
-            (project_id, project_id, project_id, project_id, json.dumps(git_dirs), directives),
+            "INSERT OR REPLACE INTO projects (project_id, name, description, template_id, git_dirs, directives, updated_at) VALUES (?, COALESCE((SELECT name FROM projects WHERE project_id = ?), ?), COALESCE((SELECT description FROM projects WHERE project_id = ?), ''), COALESCE((SELECT template_id FROM projects WHERE project_id = ?), 'software_delivery_default'), ?, ?, CURRENT_TIMESTAMP)",
+            (project_id, project_id, project_id, project_id, project_id, json.dumps(git_dirs), directives),
         )
         con.commit()
         con.close()
@@ -279,6 +359,15 @@ class MemoryStore:
         directives = json.loads(row["directives"] if row and row["directives"] else "{}")
         directives[key] = value
         con.execute("UPDATE projects SET directives = ?, updated_at = CURRENT_TIMESTAMP WHERE project_id = ?", (json.dumps(directives), project_id))
+        con.commit()
+        con.close()
+
+    def project_set_template(self, project_id: str, template_id: str) -> None:
+        con = self._connect()
+        con.execute(
+            "UPDATE projects SET template_id = ?, updated_at = CURRENT_TIMESTAMP WHERE project_id = ?",
+            (template_id, project_id),
+        )
         con.commit()
         con.close()
 
