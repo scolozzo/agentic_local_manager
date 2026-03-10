@@ -19,3 +19,7 @@ def get_gitlab_project_id(stack_key: str) -> str:
 
 def get_develop_branch(stack_key: str) -> str:
     return _load_repos().get((stack_key or "BACK").upper(), {}).get("develop_branch", "develop")
+
+
+def get_repo_config(stack_key: str) -> dict:
+    return _load_repos().get((stack_key or "BACK").upper(), {})

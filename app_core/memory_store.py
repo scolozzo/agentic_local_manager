@@ -63,6 +63,7 @@ class MemoryStore:
                 project_id TEXT PRIMARY KEY,
                 name TEXT,
                 description TEXT,
+                template_id TEXT DEFAULT 'software_delivery_default',
                 git_dirs TEXT,
                 directives TEXT DEFAULT '{}',
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -83,7 +84,16 @@ class MemoryStore:
             );
             """
         )
-        con.commit()
+        try:
+            con.execute("ALTER TABLE projects ADD COLUMN template_id TEXT DEFAULT 'software_delivery_default'")
+            con.commit()
+        except sqlite3.OperationalError:
+            pass
+        try:
+            con.execute("ALTER TABLE sprints ADD COLUMN project_id TEXT DEFAULT 'SEGURO'")
+            con.commit()
+        except sqlite3.OperationalError:
+            pass
         con.close()
 
     def board_create_task(self, task_id: str, summary: str, description: str = "", state: str = "Todo",
@@ -251,13 +261,20 @@ class MemoryStore:
         con = self._connect()
         rows = con.execute("SELECT * FROM projects ORDER BY created_at DESC").fetchall()
         con.close()
-        return [dict(row) for row in rows]
+        projects = []
+        for row in rows:
+            item = dict(row)
+            item["git_dirs"] = json.loads(item.get("git_dirs") or "{}")
+            item["directives"] = json.loads(item.get("directives") or "{}")
+            item.setdefault("template_id", "software_delivery_default")
+            projects.append(item)
+        return projects
 
-    def project_create(self, project_id: str, name: str, description: str, git_dirs: dict) -> None:
+    def project_create(self, project_id: str, name: str, description: str, git_dirs: dict, template_id: str = "software_delivery_default") -> None:
         con = self._connect()
         con.execute(
-            "INSERT OR REPLACE INTO projects (project_id, name, description, git_dirs, updated_at) VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)",
-            (project_id, name, description, json.dumps(git_dirs)),
+            "INSERT OR REPLACE INTO projects (project_id, name, description, template_id, git_dirs, updated_at) VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)",
+            (project_id, name, description, template_id, json.dumps(git_dirs)),
         )
         con.commit()
         con.close()
@@ -267,8 +284,8 @@ class MemoryStore:
         row = con.execute("SELECT directives FROM projects WHERE project_id = ?", (project_id,)).fetchone()
         directives = row["directives"] if row else "{}"
         con.execute(
-            "INSERT OR REPLACE INTO projects (project_id, name, description, git_dirs, directives, updated_at) VALUES (?, COALESCE((SELECT name FROM projects WHERE project_id = ?), ?), COALESCE((SELECT description FROM projects WHERE project_id = ?), ''), ?, ?, CURRENT_TIMESTAMP)",
-            (project_id, project_id, project_id, project_id, json.dumps(git_dirs), directives),
+            "INSERT OR REPLACE INTO projects (project_id, name, description, template_id, git_dirs, directives, updated_at) VALUES (?, COALESCE((SELECT name FROM projects WHERE project_id = ?), ?), COALESCE((SELECT description FROM projects WHERE project_id = ?), ''), COALESCE((SELECT template_id FROM projects WHERE project_id = ?), 'software_delivery_default'), ?, ?, CURRENT_TIMESTAMP)",
+            (project_id, project_id, project_id, project_id, project_id, json.dumps(git_dirs), directives),
         )
         con.commit()
         con.close()
@@ -279,6 +296,15 @@ class MemoryStore:
         directives = json.loads(row["directives"] if row and row["directives"] else "{}")
         directives[key] = value
         con.execute("UPDATE projects SET directives = ?, updated_at = CURRENT_TIMESTAMP WHERE project_id = ?", (json.dumps(directives), project_id))
+        con.commit()
+        con.close()
+
+    def project_set_template(self, project_id: str, template_id: str) -> None:
+        con = self._connect()
+        con.execute(
+            "UPDATE projects SET template_id = ?, updated_at = CURRENT_TIMESTAMP WHERE project_id = ?",
+            (template_id, project_id),
+        )
         con.commit()
         con.close()
 

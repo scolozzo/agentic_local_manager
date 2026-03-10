@@ -1,0 +1,163 @@
+{
+  "default_template": "software_delivery_default",
+  "templates": {
+    "software_delivery_default": {
+      "label": "Software Delivery Default",
+      "description": "Template fundador que preserva el workflow actual del tablero local.",
+      "workflow": {
+        "states": [
+          "Todo",
+          "InProgress",
+          "QA",
+          "Fixing",
+          "ReadyToMerge",
+          "Merged",
+          "Blocked"
+        ],
+        "transitions": [
+          "Todo -> InProgress",
+          "InProgress -> QA",
+          "QA -> Fixing",
+          "QA -> ReadyToMerge",
+          "Fixing -> QA",
+          "ReadyToMerge -> Merged",
+          "Blocked -> Todo"
+        ]
+      },
+      "allowed_stacks": [
+        "BACK",
+        "BO",
+        "MOB"
+      ],
+      "required_roles": [
+        "pm",
+        "orchestrator",
+        "developer",
+        "qa"
+      ],
+      "suggested_preset": "default_software_team",
+      "expected_artifacts": [
+        "feature_branch",
+        "merge_request",
+        "qa_report"
+      ]
+    },
+    "software_backend": {
+      "label": "Software Backend",
+      "description": "Template optimizado para proyectos backend puros.",
+      "workflow": {
+        "states": [
+          "Todo",
+          "InProgress",
+          "QA",
+          "Fixing",
+          "ReadyToMerge",
+          "Merged",
+          "Blocked"
+        ],
+        "transitions": [
+          "Todo -> InProgress",
+          "InProgress -> QA",
+          "QA -> Fixing",
+          "QA -> ReadyToMerge",
+          "Fixing -> QA",
+          "ReadyToMerge -> Merged",
+          "Blocked -> Todo"
+        ]
+      },
+      "allowed_stacks": [
+        "BACK"
+      ],
+      "required_roles": [
+        "pm",
+        "orchestrator",
+        "developer",
+        "qa"
+      ],
+      "suggested_preset": "backend_only_team",
+      "expected_artifacts": [
+        "api_contract",
+        "feature_branch",
+        "qa_report"
+      ]
+    },
+    "software_web": {
+      "label": "Software Web",
+      "description": "Template para proyectos web/backoffice.",
+      "workflow": {
+        "states": [
+          "Todo",
+          "InProgress",
+          "QA",
+          "Fixing",
+          "ReadyToMerge",
+          "Merged",
+          "Blocked"
+        ],
+        "transitions": [
+          "Todo -> InProgress",
+          "InProgress -> QA",
+          "QA -> Fixing",
+          "QA -> ReadyToMerge",
+          "Fixing -> QA",
+          "ReadyToMerge -> Merged",
+          "Blocked -> Todo"
+        ]
+      },
+      "allowed_stacks": [
+        "BO"
+      ],
+      "required_roles": [
+        "pm",
+        "orchestrator",
+        "developer",
+        "qa"
+      ],
+      "suggested_preset": "web_team",
+      "expected_artifacts": [
+        "ui_spec",
+        "feature_branch",
+        "qa_report"
+      ]
+    },
+    "software_mobile": {
+      "label": "Software Mobile",
+      "description": "Template para proyectos mobile.",
+      "workflow": {
+        "states": [
+          "Todo",
+          "InProgress",
+          "QA",
+          "Fixing",
+          "ReadyToMerge",
+          "Merged",
+          "Blocked"
+        ],
+        "transitions": [
+          "Todo -> InProgress",
+          "InProgress -> QA",
+          "QA -> Fixing",
+          "QA -> ReadyToMerge",
+          "Fixing -> QA",
+          "ReadyToMerge -> Merged",
+          "Blocked -> Todo"
+        ]
+      },
+      "allowed_stacks": [
+        "MOB"
+      ],
+      "required_roles": [
+        "pm",
+        "orchestrator",
+        "developer",
+        "qa"
+      ],
+      "suggested_preset": "mobile_team",
+      "expected_artifacts": [
+        "mobile_build",
+        "feature_branch",
+        "qa_report"
+      ]
+    }
+  }
+}

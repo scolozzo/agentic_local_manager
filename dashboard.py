@@ -22,6 +22,9 @@ from app_core.agent_manager import (
     get_schedule, save_schedule, start_scheduler,
 )
 from app_core.alert_manager import get_active_alerts, clear_alert
+from app_core.memory_store import MemoryStore
+from app_core.project_context import resolve_project_context, set_active_project_id
+from app_core.project_templates import list_project_templates
 
 BASE_DIR = Path(__file__).parent
 PORT     = 8888
@@ -176,6 +179,7 @@ def get_local_board_data(sprint_id: str = "") -> dict:
 
 # ── Build data ─────────────────────────────────────────────────────────────────
 def build_data(sprint_id: str = "") -> dict:
+    memory_store = MemoryStore()
     yt         = get_local_board_data(sprint_id)
     tc         = local_token_stats()
     endpoints  = local_certified_endpoints()
@@ -198,11 +202,13 @@ def build_data(sprint_id: str = "") -> dict:
         })
     alerts = get_active_alerts(yt_url="", yt_token="",
                                bot_token=TELEGRAM_BOT_TOKEN, chat_id=TELEGRAM_CHAT_ID)
+    project_context = resolve_project_context(memory_store)
     return {"agents":agents_out,"yt":yt,"tc":tc,"endpoints":endpoints,
             "schedule":schedule,"sys_running":system_running(),
             "updated_at":datetime.now().strftime("%H:%M:%S"),
             "specs":load_specializations(),"providers":providers,
-            "alerts":alerts,"team":team_status,"active_stack":active_stack}
+            "alerts":alerts,"team":team_status,"active_stack":active_stack,
+            "project":project_context,"templates":list_project_templates()}
 
 # ── Abrir terminal PowerShell con tail del log del agente ─────────────────────
 def open_terminal(agent_id: str) -> dict:
@@ -237,6 +243,8 @@ def render(data: dict) -> str:
     provs   = data["providers"]
     team    = data["team"]
     active_stack = data.get("active_stack") or ""
+    project = data["project"]
+    templates = data["templates"]
 
     def pct(s): return int(s["verified"]/s["total"]*100) if s["total"] else 0
     def badges(by_state):
@@ -370,6 +378,11 @@ def render(data: dict) -> str:
         f'<option value="{preset["id"]}"{" selected" if preset["active"] else ""}>{preset["label"]}</option>'
         for preset in team.get("presets", [])
     )
+    template_opts = "".join(
+        f'<option value="{template["id"]}"{" selected" if template["id"] == project.get("template_id") else ""}>{template["label"]}</option>'
+        for template in templates
+    )
+    workflow_states = " → ".join(project.get("workflow", {}).get("states", []))
 
     sys_run = data["sys_running"]
     raw_alerts = data.get("alerts", [])
@@ -473,7 +486,7 @@ select,input[type=text]{{width:100%;background:#0f172a;border:1px solid #334155;
 
 <div class="topbar">
   <h1>VeloxIq</h1>
-  <span class="subtitle">SeguroAuto &nbsp;·&nbsp; {data['updated_at']} &nbsp;·&nbsp; <span id="cd">30</span>s</span>
+  <span class="subtitle">{project.get('name','Proyecto')} &nbsp;·&nbsp; {project.get('template', {}).get('label', project.get('template_id','template'))} &nbsp;·&nbsp; {data['updated_at']} &nbsp;·&nbsp; <span id="cd">30</span>s</span>
   <button class="btn {'btn-red' if sys_run else 'btn-green'}" onclick="systemToggle()">
     {'Apagar' if sys_run else 'Encender'}
   </button>
@@ -496,6 +509,18 @@ select,input[type=text]{{width:100%;background:#0f172a;border:1px solid #334155;
     <button class="btn btn-sm btn-outline" onclick="toggleStack('MOB', true)">MOB on</button>
     <button class="btn btn-sm btn-outline" onclick="toggleStack('MOB', false)">MOB off</button>
   </div>
+</div>
+
+<div class="section" style="margin-bottom:12px">
+  <div class="section-title">Proyecto activo</div>
+  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+    <span style="font-size:12px;color:#e2e8f0">{project.get('project_id','SEGURO')}</span>
+    <select id="project-template-sel" onchange="updateProjectTemplate(this.value)" style="max-width:260px">
+      {template_opts}
+    </select>
+  </div>
+  <div style="font-size:11px;color:#94a3b8">{project.get('template', {}).get('description', '')}</div>
+  <div style="font-size:10px;color:#64748b;margin-top:6px">Workflow: {workflow_states}</div>
 </div>
 
 <!-- Quick scheduler controls under topbar -->
@@ -681,6 +706,7 @@ select,input[type=text]{{width:100%;background:#0f172a;border:1px solid #334155;
 <script>
 const PROVS = {json.dumps(provs)};
 const SPECS = {json.dumps(specs)};
+const ACTIVE_PROJECT_ID = {json.dumps(project.get("project_id", "SEGURO"))};
 
 setInterval(()=>{{let c=document.getElementById('cd');c.textContent=+c.textContent-1;if(+c.textContent<=0)location.reload();}},1000);
 
@@ -834,8 +860,10 @@ async function loadProjectList(){{
 }}
 
 async function selectProject(projectId){{
-  // TODO: Switch to project in backend
-  alert('Proyecto cambiado a: '+projectId);
+  const r=await fetch('/api/projects/active',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+    body:JSON.stringify({{project_id:projectId}})}});
+  const d=await r.json();
+  if(!d.ok){{alert('Error: '+(d.error||''));return;}}
   location.reload();
 }}
 
@@ -843,9 +871,10 @@ async function createProject(){{
   const id=document.getElementById('new-proj-id').value.trim();
   const name=document.getElementById('new-proj-name').value.trim();
   const desc=document.getElementById('new-proj-desc').value.trim();
+  const template_id=document.getElementById('project-template-sel').value;
   if(!id||!name){{alert('ID y Nombre son requeridos');return;}}
   const r=await fetch('/api/projects/create',{{method:'POST',headers:{{'Content-Type':'application/json'}},
-    body:JSON.stringify({{project_id:id,name,description:desc,git_dirs:{{}}}})}});
+    body:JSON.stringify({{project_id:id,name,description:desc,git_dirs:{{}},template_id}})}});
   const d=await r.json();
   if(d.ok){{
     alert('Proyecto '+id+' creado correctamente');
@@ -868,7 +897,7 @@ async function saveGitDirs(){{
   if(mob) git_dirs.MOB=mob;
   if(!Object.keys(git_dirs).length){{alert('Al menos una ruta requerida');return;}}
 
-  const r=await fetch('/api/projects/SEGURO/config',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+  const r=await fetch('/api/projects/'+ACTIVE_PROJECT_ID+'/config',{{method:'POST',headers:{{'Content-Type':'application/json'}},
     body:JSON.stringify({{git_dirs,directives:{{}}}})}});
   const d=await r.json();
   if(d.ok){{
@@ -890,13 +919,21 @@ async function saveDirectives(){{
   if(prefix) directives['feature-prefix']=prefix;
   if(branch) directives['dev-branch']=branch;
 
-  const r=await fetch('/api/projects/SEGURO/config',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+  const r=await fetch('/api/projects/'+ACTIVE_PROJECT_ID+'/config',{{method:'POST',headers:{{'Content-Type':'application/json'}},
     body:JSON.stringify({{git_dirs:{{}},directives}})}});
   const d=await r.json();
   if(d.ok){{
     alert('Directivas guardadas');
   }}
   else alert('Error: '+(d.error||''));
+}}
+
+async function updateProjectTemplate(template_id){{
+  const r=await fetch('/api/projects/'+ACTIVE_PROJECT_ID+'/template',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+    body:JSON.stringify({{template_id}})}});
+  const d=await r.json();
+  if(!d.ok){{alert('Error: '+(d.error||''));return;}}
+  location.reload();
 }}
 
 function openSprintModal(){{
@@ -991,24 +1028,37 @@ class Handler(BaseHTTPRequestHandler):
             from app_core.memory_store import MemoryStore
             self._json(MemoryStore().project_list())
         elif p == "/api/projects/create":
-            from app_core.memory_store import MemoryStore
             try:
                 MemoryStore().project_create(
                     body.get("project_id", ""),
                     body.get("name", ""),
                     body.get("description", ""),
-                    body.get("git_dirs", {})
+                    body.get("git_dirs", {}),
+                    body.get("template_id", "software_delivery_default"),
                 )
+                set_active_project_id(body.get("project_id", "SEGURO"))
+                self._json({"ok": True})
+            except Exception as e:
+                self._json({"ok": False, "error": str(e)}, 400)
+        elif p == "/api/projects/active":
+            try:
+                set_active_project_id(body.get("project_id", "SEGURO"))
                 self._json({"ok": True})
             except Exception as e:
                 self._json({"ok": False, "error": str(e)}, 400)
         elif p.startswith("/api/projects/") and p.endswith("/config"):
-            from app_core.memory_store import MemoryStore
             project_id = p.split("/")[3]
             try:
                 MemoryStore().project_update_git_dirs(project_id, body.get("git_dirs", {}))
                 for key, value in body.get("directives", {}).items():
                     MemoryStore().project_set_directive(project_id, key, value)
+                self._json({"ok": True})
+            except Exception as e:
+                self._json({"ok": False, "error": str(e)}, 400)
+        elif p.startswith("/api/projects/") and p.endswith("/template"):
+            project_id = p.split("/")[3]
+            try:
+                MemoryStore().project_set_template(project_id, body.get("template_id", "software_delivery_default"))
                 self._json({"ok": True})
             except Exception as e:
                 self._json({"ok": False, "error": str(e)}, 400)
