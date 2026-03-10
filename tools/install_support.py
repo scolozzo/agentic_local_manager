@@ -23,6 +23,8 @@ SKIP_NAMES = {
     ".mypy_cache",
 }
 GIT_TOKEN_ENV = {"github": "GITHUB_TOKEN", "gitlab": "GITLAB_TOKEN"}
+MANUAL_LOGIN_SERVICE_ID = "chatgpt_login"
+MANUAL_LOGIN_PROFILE_ID = "chatgpt_login:chatgpt-login"
 
 
 def copy_repo(source: Path, target: Path, overwrite: bool = False) -> None:
@@ -66,10 +68,12 @@ def validate_service(service_id: str, service: dict, api_key: str = "") -> dict:
     return validate_llm_service(service_id, service, api_key)
 
 
-def available_profiles(settings: dict) -> list[dict]:
+def available_profiles(settings: dict, include_manual: bool = True) -> list[dict]:
     profiles = []
     for service_id, service in settings.get("llm_services", {}).items():
         if not service.get("available"):
+            continue
+        if not include_manual and service.get("mode") == "manual_login":
             continue
         for model in service.get("models", []):
             profiles.append(
@@ -83,6 +87,27 @@ def available_profiles(settings: dict) -> list[dict]:
     return profiles
 
 
+def ensure_manual_login_fallback(settings: dict) -> str:
+    service = settings.setdefault("llm_services", {}).setdefault(
+        MANUAL_LOGIN_SERVICE_ID,
+        {
+            "label": "ChatGPT Login",
+            "mode": "manual_login",
+            "available": True,
+            "validated": False,
+            "manual_only": True,
+            "models": ["chatgpt-login"],
+        },
+    )
+    service["available"] = True
+    service["validated"] = False
+    service["manual_only"] = True
+    role_defaults = settings.setdefault("role_defaults", {})
+    for role in ("developers", "qa", "orchestrator", "pm"):
+        role_defaults[role] = MANUAL_LOGIN_PROFILE_ID
+    return MANUAL_LOGIN_PROFILE_ID
+
+
 def write_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
@@ -93,22 +118,26 @@ def write_env(path: Path, values: dict[str, str]) -> None:
     path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
 
 
-def create_desktop_shortcut(launcher_path: Path, working_dir: Path) -> None:
-    desktop = Path.home() / "Desktop" / "Agentic Local Manager.lnk"
+def create_desktop_shortcut(launcher_path: Path, working_dir: Path) -> str | None:
     launcher_path = launcher_path.resolve()
     working_dir = working_dir.resolve()
     ps_script = (
         "$shell = New-Object -ComObject WScript.Shell; "
-        f"$shortcut = $shell.CreateShortcut('{desktop}'); "
+        "$desktop = $shell.SpecialFolders('Desktop'); "
+        "$shortcut = $shell.CreateShortcut((Join-Path $desktop 'Agentic Local Manager.lnk')); "
         "$shortcut.TargetPath = 'cmd.exe'; "
         f"$shortcut.Arguments = '/c \"\"{launcher_path}\"\"'; "
         f"$shortcut.WorkingDirectory = '{working_dir}'; "
         f"$shortcut.IconLocation = '{launcher_path},0'; "
         "$shortcut.Save()"
     )
-    subprocess.run(
-        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_script],
-        check=True,
-        cwd=str(working_dir),
-    )
+    try:
+        subprocess.run(
+            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_script],
+            check=True,
+            cwd=str(working_dir),
+        )
+    except (subprocess.CalledProcessError, OSError) as exc:
+        return str(exc)
+    return None
 

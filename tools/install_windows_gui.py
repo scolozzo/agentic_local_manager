@@ -13,6 +13,7 @@ from install_support import (
     build_default_settings,
     copy_repo,
     create_desktop_shortcut,
+    ensure_manual_login_fallback,
     validate_git,
     validate_service,
     write_env,
@@ -33,6 +34,7 @@ class InstallerApp:
         self.git_token = tk.StringVar()
         self.git_status = tk.StringVar(value="Todavia no validado.")
         self.summary_text = tk.StringVar()
+        self.install_warning = tk.StringVar()
 
         self.service_vars: dict[str, dict] = {}
         self.role_default_vars = {
@@ -259,6 +261,7 @@ class InstallerApp:
             foreground="#555555",
         ).pack(anchor="w", pady=(6, 12))
         ttk.Label(parent, textvariable=self.summary_text, justify="left", wraplength=860).pack(anchor="w")
+        ttk.Label(parent, textvariable=self.install_warning, justify="left", wraplength=860, foreground="#b45309").pack(anchor="w", pady=(12, 0))
 
     def _browse_install_dir(self) -> None:
         selected = filedialog.askdirectory(initialdir=self.install_dir.get() or str(Path.home()))
@@ -299,6 +302,11 @@ class InstallerApp:
             self._show_step(self.current_step - 1)
 
     def _go_next(self) -> None:
+        if self.current_step == 2:
+            self._finalize_llm_step()
+            if not self.profile_labels:
+                self._show_step(4)
+                return
         if self.current_step < len(self.step_frames) - 1:
             self._show_step(self.current_step + 1)
 
@@ -311,6 +319,9 @@ class InstallerApp:
         defaults = []
         for role, variable in self.role_default_vars.items():
             defaults.append(f"- {role}: {variable.get() or 'sin seleccionar'}")
+        fallback = ""
+        if not self.profile_labels:
+            fallback = "\n\nFallback activo:\n- ChatGPT Login quedará como perfil por defecto para todos los agentes."
         self.summary_text.set(
             "Carpeta de instalacion:\n"
             f"- {self.install_dir.get()}\n\n"
@@ -321,7 +332,7 @@ class InstallerApp:
             "Servicios habilitados:\n"
             f"{chr(10).join(enabled_services) if enabled_services else '- ninguno'}\n\n"
             "Perfiles por rol:\n"
-            f"{chr(10).join(defaults)}"
+            f"{chr(10).join(defaults)}{fallback}"
         )
 
     def validate_git_credentials(self) -> None:
@@ -396,19 +407,41 @@ class InstallerApp:
             field_state = self.service_vars.get(service_id)
             if service.get("mode") == "manual_login" and field_state and field_state["enabled"].get():
                 service["available"] = True
-        profiles = available_profiles(self.settings)
+        profiles = available_profiles(self.settings, include_manual=False)
         self.profile_labels = [item["label"] for item in profiles]
         self.profile_index_by_label = {item["label"]: item["id"] for item in profiles}
         for key, combo in self.role_boxes.items():
             combo["values"] = self.profile_labels
-            if not self.role_default_vars[key].get() and self.profile_labels:
-                self.role_default_vars[key].set(self.profile_labels[0])
+            if self.profile_labels:
+                if self.role_default_vars[key].get() not in self.profile_labels:
+                    self.role_default_vars[key].set(self.profile_labels[0])
+                combo.state(["!disabled"])
+            else:
+                self.role_default_vars[key].set("")
+                combo.state(["disabled"])
+
+    def _finalize_llm_step(self) -> None:
+        self._refresh_profile_dropdowns()
+        if self.profile_labels:
+            return
+        ensure_manual_login_fallback(self.settings)
+        manual_service = self.service_vars.get("chatgpt_login")
+        if manual_service:
+            manual_service["enabled"].set(True)
+            manual_service["status"].set("Fallback manual habilitado por defecto.")
+        self.install_warning.set(
+            "No se validó ninguna API key. El instalador usará ChatGPT Login como fallback para todos los agentes."
+        )
 
     def run_install(self) -> None:
         target_root = Path(self.install_dir.get().strip()).expanduser().resolve()
+        if target_root == SOURCE_ROOT:
+            messagebox.showerror("Instalacion", "Elegí una carpeta de instalación distinta al repositorio actual.")
+            return
         if not self.settings["git"].get("validated"):
             if not messagebox.askyesno("Instalacion", "Las credenciales Git no están validadas. ¿Continuar igual?"):
                 return
+        self._finalize_llm_step()
 
         settings = build_default_settings(target_root)
         settings["git"] = dict(self.settings["git"])
@@ -434,8 +467,11 @@ class InstallerApp:
                 if token:
                     env_values[service["api_key_env"]] = token
 
-        for role, variable in self.role_default_vars.items():
-            settings["role_defaults"][role] = self.profile_index_by_label.get(variable.get(), "")
+        if self.profile_labels:
+            for role, variable in self.role_default_vars.items():
+                settings["role_defaults"][role] = self.profile_index_by_label.get(variable.get(), "")
+        else:
+            ensure_manual_login_fallback(settings)
 
         overwrite = False
         if target_root.exists():
@@ -446,8 +482,11 @@ class InstallerApp:
                 copy_repo(SOURCE_ROOT, target_root, overwrite=overwrite)
                 write_json(target_root / "config" / "system_settings.json", settings)
                 write_env(target_root / ".env", env_values)
-                create_desktop_shortcut(target_root / "Iniciar_Agentic_Manager.cmd", target_root)
-                self.root.after(0, lambda: messagebox.showinfo("Instalacion", f"Instalación completada en:\n{target_root}"))
+                shortcut_warning = create_desktop_shortcut(target_root / "Iniciar_Agentic_Manager.cmd", target_root)
+                message = f"Instalación completada en:\n{target_root}"
+                if shortcut_warning:
+                    message += f"\n\nNo se pudo crear el acceso directo automáticamente:\n{shortcut_warning}"
+                self.root.after(0, lambda: messagebox.showinfo("Instalacion", message))
             except Exception as exc:
                 self.root.after(0, lambda: messagebox.showerror("Instalacion", str(exc)))
 
