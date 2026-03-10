@@ -47,6 +47,10 @@ def save_agent_catalog(catalog: dict) -> None:
     AGENTS_FILE.write_text(json.dumps(catalog, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
+def save_agent_presets(presets: dict) -> None:
+    PRESETS_FILE.write_text(json.dumps(presets, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
 def load_agent_catalog() -> dict:
     catalog = _read_json(AGENTS_FILE)
     catalog.setdefault("version", 2)
@@ -62,6 +66,7 @@ def load_agent_catalog() -> dict:
 def load_agent_presets() -> dict:
     presets = _read_json(PRESETS_FILE)
     presets.setdefault("default_preset", "default_software_team")
+    presets.setdefault("active_preset", presets.get("default_preset", "default_software_team"))
     presets.setdefault("presets", {})
     return presets
 
