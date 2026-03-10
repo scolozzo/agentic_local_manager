@@ -13,13 +13,13 @@ from urllib.parse import urlparse, parse_qs
 sys.stdout.reconfigure(encoding="utf-8")
 sys.path.insert(0, str(Path(__file__).parent))
 
-from VeloxIq.agent_manager import (
+from app_core.agent_manager import (
     load_agents, load_specializations, get_log, get_current_task,
     get_agent, start_agent, stop_agent, start_all, stop_all, is_running,
     add_agent, remove_agent, system_running,
     get_schedule, save_schedule, start_scheduler,
 )
-from VeloxIq.alert_manager import get_active_alerts, clear_alert
+from app_core.alert_manager import get_active_alerts, clear_alert
 
 BASE_DIR = Path(__file__).parent
 PORT     = 8888
@@ -278,7 +278,9 @@ def render(data: dict) -> str:
     <span class="status-badge {status_cls}">{status_lbl}</span>
   </div>
   <div class="agent-meta">
+    <span class="tag" style="background:#0f766e">{a.get('role') or a.get('type') or 'agent'}</span>
     <span class="tag" style="background:{sc}">{a.get('stack') or 'ALL'}</span>
+    <span class="tag" style="background:#475569">{a.get('specialization') or 'default'}</span>
     <span class="tag" style="background:{pc}">{a.get('provider','?')}</span>
     <span style="font-size:10px;color:#475569">{a.get('model','')}</span>
     <span style="float:right;font-size:10px;color:#64748b">${a['cost_today']} hoy</span>
@@ -564,15 +566,15 @@ select,input[type=text]{{width:100%;background:#0f172a;border:1px solid #334155;
       <h4 style="font-size:13px;color:#94a3b8;margin-bottom:10px">DIRECTORIOS GIT (Rutas locales)</h4>
       <div class="fg">
         <label>BACK (FastAPI · PostgreSQL)</label>
-        <input type="text" id="git-back" placeholder="C:\Users\...\repos\backend">
+        <input type="text" id="git-back" placeholder="C:\\Users\\...\\repos\\backend">
       </div>
       <div class="fg">
         <label>BO (Next.js · shadcn/ui)</label>
-        <input type="text" id="git-bo" placeholder="C:\Users\...\repos\backoffice">
+        <input type="text" id="git-bo" placeholder="C:\\Users\\...\\repos\\backoffice">
       </div>
       <div class="fg">
         <label>MOB (Android · Compose)</label>
-        <input type="text" id="git-mob" placeholder="C:\Users\...\repos\mobile">
+        <input type="text" id="git-mob" placeholder="C:\\Users\\...\\repos\\mobile">
       </div>
       <button class="btn btn-green" onclick="saveGitDirs()" style="width:100%">Guardar Directorios</button>
     </div>
@@ -678,10 +680,12 @@ async function addAgent(){{
   const model=document.getElementById('nm').value;
   const type=document.getElementById('nt').value;
   const name=document.getElementById('nn').value;
-  const stack=SPECS[spec]?.stack||'BACK';
+  const role=SPECS[spec]?.role||(type==='dev'?'developer':type);
+  const stack=SPECS[spec]?.stack||'backend';
+  const stack_key=SPECS[spec]?.stack_key||'BACK';
   const id=type+'_'+spec+'_'+Date.now().toString(36);
   const r=await fetch('/api/agents',{{method:'POST',headers:{{'Content-Type':'application/json'}},
-    body:JSON.stringify({{id,name:name||spec,type,stack,specialization:spec,provider:prov,model}})}});
+    body:JSON.stringify({{id,name:name||spec,type,role,stack,stack_key,specialization:spec,provider:prov,model}})}});
   const d=await r.json();
   if(d.ok){{document.getElementById('mbg').classList.remove('open');location.reload();}}
   else alert('Error: '+d.error);
@@ -891,7 +895,7 @@ class Handler(BaseHTTPRequestHandler):
         elif p.startswith("/api/tasks/"):
             task_id = p[len("/api/tasks/"):]
             try:
-                from VeloxIq.memory_store import MemoryStore
+                from app_core.memory_store import MemoryStore
                 task = MemoryStore().board_get_task(task_id)
                 if task:
                     self._json({"ok": True, "task": task})
@@ -919,19 +923,19 @@ class Handler(BaseHTTPRequestHandler):
         elif p=="/api/schedule":       save_schedule(body);self._json({"ok":True})
         elif p.startswith("/api/sprint/") and p.endswith("/pause"):
             sid = p.split("/")[3]
-            from VeloxIq.memory_store import MemoryStore
+            from app_core.memory_store import MemoryStore
             msg = MemoryStore().sprint_pause(sid)
             self._json({"ok": True, "message": msg})
         elif p.startswith("/api/sprint/") and p.endswith("/resume"):
             sid = p.split("/")[3]
-            from VeloxIq.memory_store import MemoryStore
+            from app_core.memory_store import MemoryStore
             msg = MemoryStore().sprint_resume(sid)
             self._json({"ok": True, "message": msg})
         elif p == "/api/projects":
-            from VeloxIq.memory_store import MemoryStore
+            from app_core.memory_store import MemoryStore
             self._json(MemoryStore().project_list())
         elif p == "/api/projects/create":
-            from VeloxIq.memory_store import MemoryStore
+            from app_core.memory_store import MemoryStore
             try:
                 MemoryStore().project_create(
                     body.get("project_id", ""),
@@ -943,7 +947,7 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._json({"ok": False, "error": str(e)}, 400)
         elif p.startswith("/api/projects/") and p.endswith("/config"):
-            from VeloxIq.memory_store import MemoryStore
+            from app_core.memory_store import MemoryStore
             project_id = p.split("/")[3]
             try:
                 MemoryStore().project_update_git_dirs(project_id, body.get("git_dirs", {}))
@@ -953,8 +957,8 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 self._json({"ok": False, "error": str(e)}, 400)
         elif p == "/api/sprints/create":
-            from VeloxIq.memory_store import MemoryStore
-            from VeloxIq.sprint_manager import create_sprint_from_plan
+            from app_core.memory_store import MemoryStore
+            from app_core.sprint_manager import create_sprint_from_plan
             try:
                 # Expect: {sprint_id, name, stack, tasks: [{id, summary, depends_on, parallel}]}
                 plan = {
@@ -987,8 +991,8 @@ class Handler(BaseHTTPRequestHandler):
                 content = item.file.read().decode("utf-8", "replace")
             except Exception as e:
                 self._json({"ok": False, "error": f"Read error: {e}"}); return
-            from VeloxIq.sprint_manager import parse_plan, create_sprint_from_plan
-            from VeloxIq.memory_store import MemoryStore
+            from app_core.sprint_manager import parse_plan, create_sprint_from_plan
+            from app_core.memory_store import MemoryStore
             plan = parse_plan(content)
             if not plan:
                 self._json({"ok": False, "error": "Could not parse plan (use JSON or Markdown format)"}); return
