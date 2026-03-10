@@ -10,6 +10,21 @@ _DEFAULT_SUBPROJECTS = {
     "FLUTTER": {"label": "Mobile - Flutter", "stack_key": "MOB", "substack": "flutter"},
 }
 
+_STACK_DEFAULT_SKILLS = {
+    ("BACK", "api"): ["backend", "db", "qa_backend"],
+    ("BO", "backoffice"): ["front_web", "bo_backend", "qa_bo"],
+    ("BO", "landing"): ["front_web", "qa_bo"],
+    ("MOB", "android"): ["mob_android", "mob_backend", "qa_mob", "ux_android"],
+    ("MOB", "ios"): ["mob_android", "mob_backend", "qa_mob", "ux_ios"],
+    ("MOB", "flutter"): ["mob_android", "mob_backend", "qa_mob"],
+}
+
+_DEFAULT_SUBSTACKS = {
+    "BACK": ["api", "db"],
+    "BO": ["backoffice", "landing"],
+    "MOB": ["android", "ios", "flutter"],
+}
+
 
 def normalize_project_subprojects(git_dirs: dict | None) -> list[dict]:
     subprojects = []
@@ -27,10 +42,16 @@ def normalize_project_subprojects(git_dirs: dict | None) -> list[dict]:
             base["stack_key"] = raw_value.get("stack_key") or base["stack_key"]
             base["substack"] = raw_value.get("substack", base["substack"])
             base["stack_name"] = raw_value.get("stack_name", base["stack_key"])
+            base["skills"] = raw_value.get("skills", default_skills_for_scope(base["stack_key"], base["substack"]))
+            base["dev_model_profile"] = raw_value.get("dev_model_profile", "")
+            base["qa_model_profile"] = raw_value.get("qa_model_profile", "")
         else:
             repo_dir = str(raw_value)
             base["rules"] = []
             base["stack_name"] = base["stack_key"]
+            base["skills"] = default_skills_for_scope(base["stack_key"], base["substack"])
+            base["dev_model_profile"] = ""
+            base["qa_model_profile"] = ""
         base["id"] = subproject_id
         base["repo_dir"] = repo_dir
         subprojects.append(base)
@@ -47,3 +68,34 @@ def get_subproject_definition(subproject_id: str) -> dict:
     base.setdefault("rules", [])
     base.setdefault("stack_name", base["stack_key"])
     return base
+
+
+def default_skills_for_scope(stack_key: str | None, substack: str | None = None) -> list[str]:
+    normalized_stack = (stack_key or "").strip().upper()
+    normalized_substack = (substack or "").strip().lower()
+    return list(_STACK_DEFAULT_SKILLS.get((normalized_stack, normalized_substack), []))
+
+
+def list_substack_options(stack_key: str | None) -> list[str]:
+    return list(_DEFAULT_SUBSTACKS.get((stack_key or "").strip().upper(), []))
+
+
+def upsert_subproject_config(git_dirs: dict | None, subproject_data: dict) -> dict:
+    normalized = dict(git_dirs or {})
+    subproject_id = (subproject_data.get("id") or "").strip().upper()
+    if not subproject_id:
+        raise ValueError("Subproject id is required")
+    stack_key = (subproject_data.get("stack_key") or "").strip().upper()
+    substack = (subproject_data.get("substack") or "").strip().lower()
+    normalized[subproject_id] = {
+        "label": (subproject_data.get("label") or subproject_id).strip(),
+        "repo_dir": (subproject_data.get("repo_dir") or "").strip(),
+        "stack_key": stack_key,
+        "substack": substack,
+        "stack_name": (subproject_data.get("stack_name") or stack_key).strip(),
+        "rules": list(subproject_data.get("rules") or []),
+        "skills": list(subproject_data.get("skills") or default_skills_for_scope(stack_key, substack)),
+        "dev_model_profile": (subproject_data.get("dev_model_profile") or "").strip(),
+        "qa_model_profile": (subproject_data.get("qa_model_profile") or "").strip(),
+    }
+    return normalized

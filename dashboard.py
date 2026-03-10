@@ -28,9 +28,16 @@ from app_core.alert_manager import get_active_alerts, clear_alert
 from app_core.memory_store import MemoryStore
 from app_core.project_context import require_project_context, resolve_project_context, set_active_project_id
 from app_core.platform_settings import load_platform_settings, save_platform_settings
-from app_core.project_subprojects import get_subproject_definition, normalize_project_subprojects
+from app_core.project_subprojects import (
+    default_skills_for_scope,
+    get_subproject_definition,
+    list_substack_options,
+    normalize_project_subprojects,
+    upsert_subproject_config,
+)
 from app_core.project_templates import get_workflow_definition, get_project_template, list_project_templates
 from app_core.project_validation import validate_project_configuration, resolve_stack_for_project
+from app_core.system_settings import list_available_model_profiles, load_system_settings
 
 BASE_DIR = Path(__file__).parent
 PORT     = 8888
@@ -294,6 +301,7 @@ def build_data(sprint_id: str = "") -> dict:
                                bot_token=TELEGRAM_BOT_TOKEN, chat_id=TELEGRAM_CHAT_ID)
     subprojects = normalize_project_subprojects(project_context.get("git_dirs", {}))
     platform_settings = load_platform_settings()
+    system_settings = load_system_settings()
     return {"agents":agents_out,"yt":yt,"tc":tc,"endpoints":endpoints,
             "schedule":schedule,"sys_running":system_running(),
             "updated_at":datetime.now().strftime("%H:%M:%S"),
@@ -304,7 +312,9 @@ def build_data(sprint_id: str = "") -> dict:
             "available_teams": list_team_presets(),
             "platform_state": platform_state,
             "platform_settings": platform_settings,
-            "subprojects": subprojects}
+            "subprojects": subprojects,
+            "system_settings": system_settings,
+            "model_profiles": list_available_model_profiles(system_settings)}
 
 # ── Abrir terminal PowerShell con tail del log del agente ─────────────────────
 def open_terminal(agent_id: str) -> dict:
@@ -348,6 +358,9 @@ def render(data: dict) -> str:
     platform_settings = data.get("platform_settings", {})
     subprojects = data.get("subprojects", [])
     platform_state = data.get("platform_state", {}).get("state", {})
+    system_settings = data.get("system_settings", {})
+    model_profiles = data.get("model_profiles", [])
+    has_subprojects = bool(subprojects)
 
     def pct(s): return int(s["verified"]/s["total"]*100) if s["total"] else 0
     def badges(by_state):
@@ -505,6 +518,18 @@ def render(data: dict) -> str:
         f'<option value="{subproject["id"]}" data-stack="{subproject.get("stack_key","")}" data-substack="{subproject.get("substack","")}">{subproject.get("label", subproject["id"])} · {subproject.get("repo_dir","")}</option>'
         for subproject in subprojects
     ) or '<option value="">No hay subproyectos configurados</option>'
+    model_profile_options = "".join(
+        f'<option value="{profile["id"]}">{profile["service_label"]} · {profile["model"]}</option>'
+        for profile in model_profiles
+    ) or '<option value="">Sin perfiles LLM validados</option>'
+    subproject_cards = "".join(
+        f'<div class="card" style="padding:12px">'
+        f'<div style="font-size:13px;font-weight:700;color:#e2e8f0">{textarea_escape(subproject.get("label", subproject["id"]))}</div>'
+        f'<div style="font-size:11px;color:#94a3b8;margin-top:4px">{subproject.get("stack_key","")} / {subproject.get("substack","")}</div>'
+        f'<div style="font-size:11px;color:#64748b;margin-top:4px">{textarea_escape(subproject.get("repo_dir",""))}</div>'
+        f'</div>'
+        for subproject in subprojects
+    )
     restored_sprint_id = active.get("sprint_id") or runtime_state.get("last_sprint_id", "") or platform_state.get("last_sprint_id", "")
     restored_team_id = active_team.get("id") or runtime_state.get("context", {}).get("team_id", "") or platform_state.get("last_team_id", "")
     restored_subproject_id = active.get("subproject_id") or runtime_state.get("context", {}).get("subproject_id", "") or platform_state.get("last_subproject_id", "")
@@ -526,6 +551,84 @@ def render(data: dict) -> str:
         if not items:
             return f'<div style="font-size:11px;color:#64748b">{empty_text}</div>'
         return "".join(f'<li>{textarea_escape(item)}</li>' for item in items)
+
+    onboarding_html = ""
+    if not project_exists:
+        onboarding_html = f"""
+<div class="section">
+  <div class="section-title">Crear proyecto</div>
+  <div style="max-width:560px">
+    <div style="font-size:12px;color:#94a3b8;margin-bottom:12px">El sistema necesita primero un proyecto. Hasta que no exista uno, no se muestran tablero ni agentes.</div>
+    <div class="fg">
+      <label>Nombre del proyecto</label>
+      <input type="text" id="onboard-proj-name" placeholder="Nombre completo" oninput="updateGeneratedProjectId('onboard')">
+    </div>
+    <div class="fg">
+      <label>Descripcion</label>
+      <input type="text" id="onboard-proj-desc" placeholder="Descripcion breve">
+    </div>
+    <div class="fg">
+      <label>ID generado</label>
+      <input type="text" id="onboard-proj-id" placeholder="Se genera automaticamente" readonly>
+    </div>
+    <button class="btn btn-green" onclick="createProject()" style="width:100%">Crear proyecto</button>
+  </div>
+</div>"""
+    elif not has_subprojects:
+        onboarding_html = f"""
+<div class="section">
+  <div class="section-title">Crear primer subproyecto</div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start">
+    <div>
+      <div style="font-size:12px;color:#94a3b8;margin-bottom:12px">Cada proyecto necesita al menos un subproyecto con stack, substack, repositorio y perfiles LLM por defecto para developers y QA.</div>
+      <div class="fg">
+        <label>Nombre del subproyecto</label>
+        <input type="text" id="subproject-name" placeholder="Ej: API Core">
+      </div>
+      <div class="fg">
+        <label>Stack</label>
+        <select id="subproject-stack" onchange="refreshSubprojectForm()">
+          <option value="BACK">Backend</option>
+          <option value="BO">Front Web</option>
+          <option value="MOB">Front Mobile</option>
+        </select>
+      </div>
+      <div class="fg">
+        <label>Substack existente</label>
+        <select id="subproject-substack" onchange="refreshSubprojectForm()"></select>
+      </div>
+      <div class="fg">
+        <label>O crear nuevo substack</label>
+        <input type="text" id="subproject-substack-custom" placeholder="Opcional">
+      </div>
+      <div class="fg">
+        <label>Repositorio</label>
+        <input type="text" id="subproject-repo" placeholder="C:\\Users\\...\\repos\\mi-subproyecto">
+      </div>
+      <div class="fg">
+        <label>Skills del substack</label>
+        <select id="subproject-skills" multiple style="height:120px"></select>
+      </div>
+      <div class="fg">
+        <label>Modelo por defecto para los 3 developers</label>
+        <select id="subproject-dev-model">{model_profile_options}</select>
+      </div>
+      <div class="fg">
+        <label>Modelo por defecto para QA</label>
+        <select id="subproject-qa-model">{model_profile_options}</select>
+      </div>
+      <button class="btn btn-green" onclick="createSubproject()" style="width:100%">Crear subproyecto</button>
+    </div>
+    <div>
+      <div style="font-size:12px;color:#e2e8f0;font-weight:700;margin-bottom:8px">Configuracion global actual</div>
+      <div style="font-size:11px;color:#94a3b8;margin-bottom:8px">PM y Orchestrator usan el perfil global definido en la instalacion. Developers y QA se fijan por subproyecto.</div>
+      <div style="font-size:11px;color:#cbd5e1;line-height:1.6">
+        <div>PM: {textarea_escape(system_settings.get("role_defaults", {}).get("pm", "") or "sin perfil")}</div>
+        <div>Orchestrator: {textarea_escape(system_settings.get("role_defaults", {}).get("orchestrator", "") or "sin perfil")}</div>
+      </div>
+    </div>
+  </div>
+</div>"""
 
     sys_run = data["sys_running"]
     raw_alerts = data.get("alerts", [])
@@ -635,14 +738,17 @@ select,input[type=text]{{width:100%;background:#0f172a;border:1px solid #334155;
 <div class="topbar">
   <h1>VeloxIq</h1>
   <span class="subtitle">{project.get('name','Proyecto')} &nbsp;·&nbsp; {project.get('template', {}).get('label', project.get('template_id','template'))} &nbsp;·&nbsp; {data['updated_at']} &nbsp;·&nbsp; <span id="cd">30</span>s</span>
-  <button class="btn {'btn-red' if sys_run else 'btn-green'}" onclick="systemToggle()">
+  {f'''<button class="btn {'btn-red' if sys_run else 'btn-green'}" onclick="systemToggle()">
     {'Apagar' if sys_run else 'Encender'}
   </button>
   <button class="btn btn-blue" onclick="document.getElementById('mbg').classList.add('open')">+ Agente</button>
+  <button class="btn btn-blue" onclick="openSprintModal()" style="background:#d946ef">+ Sprint</button>''' if project_exists and has_subprojects else ''}
   <button class="btn btn-blue" onclick="openConfigModal()" style="background:#8b5cf6">Configuracion</button>
-  <button class="btn btn-blue" onclick="openSprintModal()" style="background:#d946ef">+ Sprint</button>
 </div>
 
+{onboarding_html}
+
+{'' if not project_exists else f'''
 <div class="section" style="margin-bottom:12px">
   <div class="section-title">Equipo activo</div>
   <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
@@ -672,6 +778,11 @@ select,input[type=text]{{width:100%;background:#0f172a;border:1px solid #334155;
 </div>
 
 <div class="section" style="margin-bottom:12px">
+  <div class="section-title">Subproyectos</div>
+  <div class="grid3">{subproject_cards or '<div style="font-size:12px;color:#94a3b8">Todavia no hay subproyectos configurados.</div>'}</div>
+</div>
+
+<div class="section" style="margin-bottom:12px">
   <div class="section-title">Contexto restaurado y logica activa</div>
   <div style="display:grid;grid-template-columns:1.2fr 1fr;gap:14px;align-items:start">
     <div style="background:#0f172a;border:1px solid #334155;border-radius:10px;padding:12px">
@@ -690,7 +801,9 @@ select,input[type=text]{{width:100%;background:#0f172a;border:1px solid #334155;
     </div>
   </div>
 </div>
+'''}
 
+{'' if not (project_exists and has_subprojects) else f'''
 <!-- Quick scheduler controls under topbar -->
 <div style="display:flex;gap:10px;margin-bottom:12px;align-items:center;font-size:11px">
   <div class="sched">
@@ -743,6 +856,7 @@ select,input[type=text]{{width:100%;background:#0f172a;border:1px solid #334155;
   <div class="section-title">Endpoints certificados por QA</div>
   <table><tr><th>Método</th><th>Endpoint</th><th>Stack</th><th>Certificado</th></tr>{ep_html}</table>
 </div>
+'''}
 
 <!-- MODAL -->
 <div class="modal-bg" id="mbg">
@@ -785,22 +899,51 @@ select,input[type=text]{{width:100%;background:#0f172a;border:1px solid #334155;
           <label>ID generado</label>
           <input type="text" id="new-proj-id" placeholder="Se genera automaticamente" readonly>
         </div>
+        <button class="btn btn-green" onclick="createProject()" style="width:100%">Crear Proyecto</button>
+      </div>
+    </details>
+
+    <details class="config-group">
+      <summary>Alta De Subproyecto <span style="font-size:11px;color:#64748b">habilita tablero y agentes</span></summary>
+      <div class="config-group-body">
+        <div style="font-size:11px;color:#64748b;margin-bottom:10px">Selecciona o crea un substack, define skills y asigna perfiles LLM por defecto para developers y QA.</div>
         <div class="fg">
-          <label>Tipo de subproyecto inicial</label>
-          <select id="new-proj-subproject">
+          <label>Nombre del subproyecto</label>
+          <input type="text" id="subproject-name-config" placeholder="Ej: Backoffice Principal">
+        </div>
+        <div class="fg">
+          <label>Stack</label>
+          <select id="subproject-stack-config" onchange="refreshSubprojectForm('config')">
             <option value="BACK">Backend</option>
-            <option value="WEB_BACKOFFICE">Front Web - Backoffice</option>
-            <option value="WEB_LANDING">Front Web - Landing</option>
-            <option value="ANDROID">Mobile - Android</option>
-            <option value="IOS">Mobile - iOS</option>
-            <option value="FLUTTER">Mobile - Flutter</option>
+            <option value="BO">Front Web</option>
+            <option value="MOB">Front Mobile</option>
           </select>
         </div>
         <div class="fg">
-          <label>Repositorio inicial</label>
-          <input type="text" id="new-proj-repo" placeholder="C:\\Users\\...\\repos\\mi-subproyecto">
+          <label>Substack existente</label>
+          <select id="subproject-substack-config" onchange="refreshSubprojectForm('config')"></select>
         </div>
-        <button class="btn btn-green" onclick="createProject()" style="width:100%">Crear Proyecto</button>
+        <div class="fg">
+          <label>O crear nuevo substack</label>
+          <input type="text" id="subproject-substack-custom-config" placeholder="Opcional">
+        </div>
+        <div class="fg">
+          <label>Repositorio</label>
+          <input type="text" id="subproject-repo-config" placeholder="C:\\Users\\...\\repos\\subproyecto">
+        </div>
+        <div class="fg">
+          <label>Skills del substack</label>
+          <select id="subproject-skills-config" multiple style="height:120px"></select>
+        </div>
+        <div class="fg">
+          <label>Modelo por defecto para developers</label>
+          <select id="subproject-dev-model-config">{model_profile_options}</select>
+        </div>
+        <div class="fg">
+          <label>Modelo por defecto para QA</label>
+          <select id="subproject-qa-model-config">{model_profile_options}</select>
+        </div>
+        <button class="btn btn-green" onclick="createSubproject('config')" style="width:100%">Guardar Subproyecto</button>
       </div>
     </details>
 
@@ -946,6 +1089,9 @@ const ACTIVE_TEAM_ID = {json.dumps(active_team.get("id", ""))};
 const ACTIVE_SUBPROJECT_ID = {json.dumps(active.get("subproject_id") or runtime_state.get("context", {}).get("subproject_id", ""))};
 const SUBPROJECTS = {json.dumps(subprojects)};
 const SPRINTS = {json.dumps(sprints)};
+const MODEL_PROFILES = {json.dumps(model_profiles)};
+const SYSTEM_ROLE_DEFAULTS = {json.dumps(system_settings.get("role_defaults", {}))};
+const SUBSTACK_OPTIONS = {json.dumps({key: list_substack_options(key) for key in ("BACK", "BO", "MOB")})};
 let sprintScopeInitialized = false;
 
 function hasOpenModal(){{
@@ -1008,10 +1154,34 @@ function slugifyProjectId(name){{
     .slice(0,32);
 }}
 
-function updateGeneratedProjectId(){{
-  const name=document.getElementById('new-proj-name')?.value||'';
-  const idField=document.getElementById('new-proj-id');
+function updateGeneratedProjectId(scope='config'){{
+  const name=document.getElementById(scope==='onboard' ? 'onboard-proj-name' : 'new-proj-name')?.value||'';
+  const idField=document.getElementById(scope==='onboard' ? 'onboard-proj-id' : 'new-proj-id');
   if(idField)idField.value=slugifyProjectId(name);
+}}
+
+function refreshSubprojectForm(scope='main'){{
+  const suffix=scope==='config' ? '-config' : '';
+  const stack=document.getElementById('subproject-stack'+suffix)?.value||'BACK';
+  const substackSelect=document.getElementById('subproject-substack'+suffix);
+  const skillsSelect=document.getElementById('subproject-skills'+suffix);
+  if(substackSelect){{
+    const options=SUBSTACK_OPTIONS[stack]||[];
+    const current=substackSelect.value;
+    substackSelect.innerHTML=options.map(value=>`<option value="${{value}}">${{value}}</option>`).join('');
+    if(current && options.includes(current))substackSelect.value=current;
+  }}
+  if(skillsSelect){{
+    const selectedSubstack=substackSelect?.value||'';
+    const recommended=TEAM_PRESETS.find(team=>((team.stack_key||'')===stack) && (!(team.substacks||[]).length || (team.substacks||[]).includes(selectedSubstack)));
+    const allowed=Object.entries(SPECS).filter(([key, spec])=>spec.role!=='pm' && spec.role!=='orchestrator' && (spec.stack_key||'')===stack);
+    skillsSelect.innerHTML=allowed.map(([key, spec])=>`<option value="${{key}}">${{spec.label}}</option>`).join('');
+    Array.from(skillsSelect.options).forEach(option=>option.selected=(recommended?.skills||[]).includes(option.value));
+  }}
+  const devModel=document.getElementById('subproject-dev-model'+suffix);
+  const qaModel=document.getElementById('subproject-qa-model'+suffix);
+  if(devModel && !devModel.value && SYSTEM_ROLE_DEFAULTS.developers)devModel.value=SYSTEM_ROLE_DEFAULTS.developers;
+  if(qaModel && !qaModel.value && SYSTEM_ROLE_DEFAULTS.qa)qaModel.value=SYSTEM_ROLE_DEFAULTS.qa;
 }}
 
 function refreshSpecializationOptions(){{
@@ -1078,6 +1248,8 @@ function toggleTeamMode(){{
 
 refreshSprintScope();
 toggleTeamMode();
+refreshSubprojectForm();
+refreshSubprojectForm('config');
 
 async function addAgent(){{
   const spec=document.getElementById('ns').value;
@@ -1195,6 +1367,7 @@ function showTaskDetail(taskId){{
 function openConfigModal(){{
   document.getElementById('config-modal-bg').classList.add('open');
   loadProjectList();
+  refreshSubprojectForm('config');
 }}
 function closeConfigModal(){{
   document.getElementById('config-modal-bg').classList.remove('open');
@@ -1225,30 +1398,49 @@ async function selectProject(projectId){{
 }}
 
 async function createProject(){{
-  const id=document.getElementById('new-proj-id').value.trim();
-  const name=document.getElementById('new-proj-name').value.trim();
-  const desc=document.getElementById('new-proj-desc').value.trim();
-  const template_id=document.getElementById('project-template-sel').value;
-  const git_dirs={{}};
-  const subproject=document.getElementById('new-proj-subproject').value;
-  const repo=document.getElementById('new-proj-repo').value.trim();
-  if(repo) git_dirs[subproject]=repo;
+  const id=(document.getElementById('onboard-proj-id')?.value||document.getElementById('new-proj-id')?.value||'').trim();
+  const name=(document.getElementById('onboard-proj-name')?.value||document.getElementById('new-proj-name')?.value||'').trim();
+  const desc=(document.getElementById('onboard-proj-desc')?.value||document.getElementById('new-proj-desc')?.value||'').trim();
+  const template_id=document.getElementById('project-template-sel')?.value||'software_delivery_default';
   if(!name||!desc){{alert('Nombre y descripcion son requeridos');return;}}
   if(!id){{alert('No se pudo generar un ID valido para el proyecto');return;}}
-  if(!repo){{alert('Debes indicar un repositorio inicial para un subproyecto');return;}}
   const r=await fetch('/api/projects/create',{{method:'POST',headers:{{'Content-Type':'application/json'}},
-    body:JSON.stringify({{project_id:id,name,description:desc,git_dirs,template_id}})}});
+    body:JSON.stringify({{project_id:id,name,description:desc,git_dirs:{{}},template_id}})}});
   const d=await r.json();
   if(d.ok){{
     alert('Proyecto '+id+' creado correctamente');
-    document.getElementById('new-proj-id').value='';
-    document.getElementById('new-proj-name').value='';
-    document.getElementById('new-proj-desc').value='';
-    document.getElementById('new-proj-repo').value='';
+    if(document.getElementById('new-proj-id'))document.getElementById('new-proj-id').value='';
+    if(document.getElementById('new-proj-name'))document.getElementById('new-proj-name').value='';
+    if(document.getElementById('new-proj-desc'))document.getElementById('new-proj-desc').value='';
+    if(document.getElementById('onboard-proj-id'))document.getElementById('onboard-proj-id').value='';
+    if(document.getElementById('onboard-proj-name'))document.getElementById('onboard-proj-name').value='';
+    if(document.getElementById('onboard-proj-desc'))document.getElementById('onboard-proj-desc').value='';
     loadProjectList();
     location.reload();
   }}
   else alert('Error: '+(d.error||''));
+}}
+
+async function createSubproject(scope='main'){{
+  const suffix=scope==='config' ? '-config' : '';
+  const projectId=ACTIVE_PROJECT_ID;
+  if(!projectId){{alert('Debes seleccionar o crear un proyecto');return;}}
+  const label=(document.getElementById('subproject-name'+suffix)?.value||'').trim();
+  const stack_key=(document.getElementById('subproject-stack'+suffix)?.value||'').trim();
+  const baseSubstack=(document.getElementById('subproject-substack'+suffix)?.value||'').trim();
+  const customSubstack=(document.getElementById('subproject-substack-custom'+suffix)?.value||'').trim();
+  const substack=(customSubstack||baseSubstack).trim();
+  const repo_dir=(document.getElementById('subproject-repo'+suffix)?.value||'').trim();
+  const skills=Array.from(document.getElementById('subproject-skills'+suffix)?.selectedOptions||[]).map(option=>option.value);
+  const dev_model_profile=(document.getElementById('subproject-dev-model'+suffix)?.value||SYSTEM_ROLE_DEFAULTS.developers||'').trim();
+  const qa_model_profile=(document.getElementById('subproject-qa-model'+suffix)?.value||SYSTEM_ROLE_DEFAULTS.qa||'').trim();
+  if(!label||!stack_key||!substack||!repo_dir){{alert('Nombre, stack, substack y repositorio son obligatorios');return;}}
+  const r=await fetch('/api/projects/'+projectId+'/subprojects',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+    body:JSON.stringify({{label,stack_key,substack,repo_dir,skills,dev_model_profile,qa_model_profile}})}});  
+  const d=await r.json();
+  if(!d.ok){{alert('Error: '+(d.error||''));return;}}
+  alert('Subproyecto guardado');
+  location.reload();
 }}
 
 async function saveGitDirs(){{
@@ -1419,17 +1611,6 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 project_id = body.get("project_id", "") or _generate_project_id(body.get("name", ""))
                 body["project_id"] = project_id
-                preview = _preview_project_context(
-                    project_id=project_id,
-                    name=body.get("name", ""),
-                    description=body.get("description", ""),
-                    template_id=body.get("template_id", "software_delivery_default"),
-                    git_dirs=body.get("git_dirs", {}),
-                    directives={},
-                )
-                if preview["validation_errors"]:
-                    self._json({"ok": False, "error": "; ".join(preview["validation_errors"])}, 400)
-                    return
                 store = MemoryStore()
                 if not project_id:
                     self._json({"ok": False, "error": "No se pudo generar un ID valido para el proyecto."}, 400)
@@ -1447,6 +1628,40 @@ class Handler(BaseHTTPRequestHandler):
                 set_active_project_id(project_id, store)
                 _save_dashboard_index_state(store, project_id)
                 self._json({"ok": True, "project_id": project_id})
+            except Exception as e:
+                self._json({"ok": False, "error": str(e)}, 400)
+        elif p.startswith("/api/projects/") and p.endswith("/subprojects"):
+            project_id = p.split("/")[3]
+            try:
+                store = MemoryStore()
+                current = require_project_context(store, project_id)
+                subproject_id = body.get("id") or body.get("label", "")
+                normalized_git_dirs = upsert_subproject_config(
+                    current.get("git_dirs", {}),
+                    {
+                        "id": _generate_project_id(subproject_id),
+                        "label": body.get("label", ""),
+                        "repo_dir": body.get("repo_dir", ""),
+                        "stack_key": body.get("stack_key", ""),
+                        "substack": body.get("substack", ""),
+                        "skills": body.get("skills") or default_skills_for_scope(body.get("stack_key", ""), body.get("substack", "")),
+                        "dev_model_profile": body.get("dev_model_profile", ""),
+                        "qa_model_profile": body.get("qa_model_profile", ""),
+                    },
+                )
+                preview = _preview_project_context(
+                    project_id=project_id,
+                    name=current.get("name", project_id),
+                    description=current.get("description", ""),
+                    template_id=current.get("template_id", "software_delivery_default"),
+                    git_dirs=normalized_git_dirs,
+                    directives=current.get("directives", {}),
+                )
+                if preview["validation_errors"] and "project requires at least one repository" not in preview["validation_errors"]:
+                    self._json({"ok": False, "error": "; ".join(preview["validation_errors"])}, 400)
+                    return
+                store.project_update_git_dirs(project_id, normalized_git_dirs)
+                self._json({"ok": True, "subprojects": normalize_project_subprojects(normalized_git_dirs)})
             except Exception as e:
                 self._json({"ok": False, "error": str(e)}, 400)
         elif p == "/api/projects/active":
@@ -1513,18 +1728,25 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 store = MemoryStore()
                 current = require_project_context(store, project_id)
+                merged_git_dirs = dict(current.get("git_dirs", {}))
+                for key, value in (body.get("git_dirs", {}) or {}).items():
+                    existing = merged_git_dirs.get(key)
+                    if isinstance(existing, dict):
+                        merged_git_dirs[key] = {**existing, "repo_dir": value}
+                    else:
+                        merged_git_dirs[key] = value
                 preview = _preview_project_context(
                     project_id=project_id,
                     name=current.get("name", project_id),
                     description=current.get("description", ""),
                     template_id=current.get("template_id", "software_delivery_default"),
-                    git_dirs=body.get("git_dirs", {}),
+                    git_dirs=merged_git_dirs,
                     directives=current.get("directives", {}),
                 )
                 if preview["validation_errors"]:
                     self._json({"ok": False, "error": "; ".join(preview["validation_errors"])}, 400)
                     return
-                store.project_update_git_dirs(project_id, body.get("git_dirs", {}))
+                store.project_update_git_dirs(project_id, merged_git_dirs)
                 self._json({"ok": True})
             except Exception as e:
                 self._json({"ok": False, "error": str(e)}, 400)

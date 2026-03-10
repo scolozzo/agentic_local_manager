@@ -102,6 +102,20 @@ def test_project_validation_accepts_single_repo_for_allowed_stack():
     assert validate_project_configuration(context) == []
 
 
+def test_project_validation_accepts_nested_subproject_metadata():
+    context = {
+        "template": {"allowed_stacks": ["BO"], "required_roles": ["pm", "developer"]},
+        "git_dirs": {
+            "BACKOFFICE_MAIN": {
+                "repo_dir": "C:/repos/backoffice",
+                "stack_key": "BO",
+                "substack": "backoffice",
+            },
+        },
+    }
+    assert validate_project_configuration(context) == []
+
+
 def test_project_validation_requires_at_least_one_repo():
     context = {
         "template": {"allowed_stacks": ["BACK"], "required_roles": ["pm", "developer"]},

@@ -1,0 +1,91 @@
+{
+  "install": {
+    "install_dir": "C:\\Trabajo\\AgenticLocalManager_Proyect",
+    "launcher_path": "C:\\Trabajo\\AgenticLocalManager_Proyect\\Iniciar_Agentic_Manager.cmd"
+  },
+  "git": {
+    "provider": "",
+    "host": "",
+    "username": "",
+    "validated": false,
+    "validated_at": ""
+  },
+  "llm_services": {
+    "chatgpt_login": {
+      "label": "ChatGPT Login",
+      "mode": "manual_login",
+      "available": false,
+      "validated": false,
+      "models": [
+        "chatgpt-login"
+      ]
+    },
+    "openai_api": {
+      "label": "OpenAI API",
+      "mode": "api",
+      "available": false,
+      "validated": false,
+      "base_url": "https://api.openai.com/v1",
+      "api_key_env": "OPENAI_API_KEY",
+      "models": [
+        "gpt-4.1",
+        "o4-mini"
+      ]
+    },
+    "codex_api": {
+      "label": "Codex API",
+      "mode": "api",
+      "available": false,
+      "validated": false,
+      "base_url": "https://api.openai.com/v1",
+      "api_key_env": "OPENAI_API_KEY",
+      "models": [
+        "codex-5.3",
+        "codex-5.4"
+      ]
+    },
+    "zai_api": {
+      "label": "Z.AI API",
+      "mode": "api",
+      "available": false,
+      "validated": false,
+      "base_url": "https://api.z.ai/api/paas/v4",
+      "api_key_env": "ZAI_API_KEY",
+      "models": [
+        "glm-4.7-flash",
+        "glm-4.7",
+        "glm-5"
+      ]
+    },
+    "qwen_api": {
+      "label": "Qwen API",
+      "mode": "api",
+      "available": false,
+      "validated": false,
+      "base_url": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+      "api_key_env": "QWEN_API_KEY",
+      "models": [
+        "qwen-max",
+        "qwen-plus",
+        "qwen-turbo"
+      ]
+    },
+    "minimax_api": {
+      "label": "MiniMax API",
+      "mode": "api",
+      "available": false,
+      "validated": false,
+      "base_url": "https://api.minimax.chat/v1",
+      "api_key_env": "MINIMAX_API_KEY",
+      "models": [
+        "minimax-m2.5-standard"
+      ]
+    }
+  },
+  "role_defaults": {
+    "developers": "",
+    "qa": "",
+    "orchestrator": "",
+    "pm": ""
+  }
+}

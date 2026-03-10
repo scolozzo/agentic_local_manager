@@ -45,14 +45,29 @@ def resolve_stack_for_project(project_context: dict, stack_key: str | None) -> s
 def validate_project_configuration(project_context: dict, git_dirs: dict | None = None) -> list[str]:
     errors: list[str] = []
     template = project_context.get("template", {})
-    configured_git_dirs = {normalize_stack_key(key): value for key, value in (git_dirs or project_context.get("git_dirs") or {}).items() if value}
+    raw_git_dirs = git_dirs or project_context.get("git_dirs") or {}
+    configured_git_dirs = {}
+    active_repo_families = set()
+    for key, value in raw_git_dirs.items():
+        if not value:
+            continue
+        configured_git_dirs[normalize_stack_key(key)] = value
+        if isinstance(value, dict):
+            stack_key = normalize_stack_key(value.get("stack_key"))
+            if stack_key in _STACK_TO_FAMILY:
+                active_repo_families.add(_STACK_TO_FAMILY[stack_key])
+        else:
+            normalized_key = normalize_stack_key(key)
+            for family, aliases in _REPO_FAMILIES.items():
+                if normalized_key in aliases:
+                    active_repo_families.add(family)
 
     if not configured_git_dirs:
         errors.append("project requires at least one repository")
 
     allowed = set(allowed_stacks(project_context))
     active_families = {_STACK_TO_FAMILY[stack] for stack in allowed if stack in _STACK_TO_FAMILY}
-    if active_families and not any(any(key in _REPO_FAMILIES[family] for key in configured_git_dirs) for family in active_families):
+    if active_families and not (active_families & active_repo_families):
         errors.append("project has no repository configured for the template active stack")
 
     required_roles = template.get("required_roles", [])
