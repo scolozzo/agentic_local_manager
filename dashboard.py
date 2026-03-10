@@ -236,14 +236,14 @@ def render(data: dict) -> str:
 
     # Stack cards
     stack_html = ""
-    labels = {"BACK":"FastAPI · PostgreSQL","BO":"Next.js · shadcn/ui","MOB":"Android · Compose"}
-    prereqs = {"BO":"Requiere BACK:auth + openapi-spec","MOB":"Requiere BACK:shared-stable"}
+    labels = {"BACK":"Backend Stack","BO":"Frontend Stack","MOB":"Mobile Stack"}
+    prereqs = {}
     for name, color in STACK_COLOR.items():
         s = stacks.get(name,{"total":0,"verified":0,"by_state":{}})
         p = pct(s)
         pre = f'<div style="color:#475569;font-size:11px;margin-top:5px">{prereqs[name]}</div>' if p==0 and name in prereqs else ""
         stack_html += f"""<div class="card">
-  <h2 style="color:{color}">SEGURO-{name} <span style="font-size:11px;color:#475569;font-weight:400">{labels[name]}</span></h2>
+  <h2 style="color:{color}">{name} Stack <span style="font-size:11px;color:#475569;font-weight:400">{labels[name]}</span></h2>
   <div class="prog-wrap"><div class="prog-bar" style="width:{p}%;background:{color}"></div></div>
   <div class="pct">{p}% &nbsp;·&nbsp; {s['verified']}/{s['total']} tareas</div>
   <div style="margin-top:6px">{badges(s['by_state'])}</div>{pre}
@@ -376,7 +376,7 @@ def render(data: dict) -> str:
         alert_html = ""
 
     return f"""<!DOCTYPE html>
-<html lang="es"><head><meta charset="UTF-8"><title>VeloxIq</title>
+<html lang="es"><head><meta charset="UTF-8"><title>Multi-Agent Project Manager</title>
 <style>
 *{{box-sizing:border-box;margin:0;padding:0}}
 body{{font-family:'Segoe UI',sans-serif;background:#0f172a;color:#e2e8f0;padding:20px}}
@@ -452,8 +452,8 @@ select,input[type=text]{{width:100%;background:#0f172a;border:1px solid #334155;
 </style></head><body>
 
 <div class="topbar">
-  <h1>VeloxIq</h1>
-  <span class="subtitle">SeguroAuto &nbsp;·&nbsp; {data['updated_at']} &nbsp;·&nbsp; <span id="cd">30</span>s</span>
+  <h1>Agent Manager</h1>
+  <span class="subtitle">Multi-Agent Project &nbsp;·&nbsp; {data['updated_at']} &nbsp;·&nbsp; <span id="cd">30</span>s</span>
   <button class="btn {'btn-red' if sys_run else 'btn-green'}" onclick="systemToggle()">
     {'Apagar' if sys_run else 'Encender'}
   </button>
@@ -563,16 +563,16 @@ select,input[type=text]{{width:100%;background:#0f172a;border:1px solid #334155;
     <div style="margin-bottom:20px;border-bottom:1px solid #334155;padding-bottom:15px">
       <h4 style="font-size:13px;color:#94a3b8;margin-bottom:10px">DIRECTORIOS GIT (Rutas locales)</h4>
       <div class="fg">
-        <label>BACK (FastAPI · PostgreSQL)</label>
-        <input type="text" id="git-back" placeholder="C:\Users\...\repos\backend">
+        <label>Backend Repository</label>
+        <input type="text" id="git-back" placeholder="/path/to/backend/repo">
       </div>
       <div class="fg">
-        <label>BO (Next.js · shadcn/ui)</label>
-        <input type="text" id="git-bo" placeholder="C:\Users\...\repos\backoffice">
+        <label>Frontend Repository</label>
+        <input type="text" id="git-bo" placeholder="/path/to/frontend/repo">
       </div>
       <div class="fg">
-        <label>MOB (Android · Compose)</label>
-        <input type="text" id="git-mob" placeholder="C:\Users\...\repos\mobile">
+        <label>Mobile Repository</label>
+        <input type="text" id="git-mob" placeholder="/path/to/mobile/repo">
       </div>
       <button class="btn btn-green" onclick="saveGitDirs()" style="width:100%">Guardar Directorios</button>
     </div>
@@ -620,9 +620,9 @@ select,input[type=text]{{width:100%;background:#0f172a;border:1px solid #334155;
     <div class="fg">
       <label>Stack</label>
       <select id="sprint-stack">
-        <option value="BACK">BACK (FastAPI)</option>
-        <option value="BO">BO (Next.js)</option>
-        <option value="MOB">MOB (Android)</option>
+        <option value="BACK">Backend</option>
+        <option value="BO">Frontend</option>
+        <option value="MOB">Mobile</option>
       </select>
     </div>
     <div class="fg">
