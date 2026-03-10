@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from pathlib import Path
+
+from app_core.agent_config import REPO_ROOT
 
 _DEFAULT_SUBPROJECTS = {
     "BACK": {"label": "Backend", "stack_key": "BACK", "substack": "api"},
@@ -37,7 +40,7 @@ def normalize_project_subprojects(git_dirs: dict | None) -> list[dict]:
             "substack": "",
         }))
         if isinstance(raw_value, dict):
-            repo_dir = raw_value.get("repo_dir") or raw_value.get("path") or ""
+            repo_url = raw_value.get("repo_url") or raw_value.get("repo_dir") or raw_value.get("path") or ""
             base["rules"] = raw_value.get("rules", [])
             base["stack_key"] = raw_value.get("stack_key") or base["stack_key"]
             base["substack"] = raw_value.get("substack", base["substack"])
@@ -45,15 +48,19 @@ def normalize_project_subprojects(git_dirs: dict | None) -> list[dict]:
             base["skills"] = raw_value.get("skills", default_skills_for_scope(base["stack_key"], base["substack"]))
             base["dev_model_profile"] = raw_value.get("dev_model_profile", "")
             base["qa_model_profile"] = raw_value.get("qa_model_profile", "")
+            workspace_dir = raw_value.get("workspace_dir") or _default_workspace_dir(raw_value.get("project_id", ""), subproject_id)
         else:
-            repo_dir = str(raw_value)
+            repo_url = str(raw_value)
             base["rules"] = []
             base["stack_name"] = base["stack_key"]
             base["skills"] = default_skills_for_scope(base["stack_key"], base["substack"])
             base["dev_model_profile"] = ""
             base["qa_model_profile"] = ""
+            workspace_dir = _default_workspace_dir("", subproject_id)
         base["id"] = subproject_id
-        base["repo_dir"] = repo_dir
+        base["repo_url"] = repo_url
+        base["repo_dir"] = repo_url
+        base["workspace_dir"] = workspace_dir
         subprojects.append(base)
     return subprojects
 
@@ -89,7 +96,9 @@ def upsert_subproject_config(git_dirs: dict | None, subproject_data: dict) -> di
     substack = (subproject_data.get("substack") or "").strip().lower()
     normalized[subproject_id] = {
         "label": (subproject_data.get("label") or subproject_id).strip(),
-        "repo_dir": (subproject_data.get("repo_dir") or "").strip(),
+        "repo_url": (subproject_data.get("repo_url") or subproject_data.get("repo_dir") or "").strip(),
+        "workspace_dir": (subproject_data.get("workspace_dir") or _default_workspace_dir(subproject_data.get("project_id", ""), subproject_id)).strip(),
+        "project_id": (subproject_data.get("project_id") or "").strip(),
         "stack_key": stack_key,
         "substack": substack,
         "stack_name": (subproject_data.get("stack_name") or stack_key).strip(),
@@ -99,3 +108,9 @@ def upsert_subproject_config(git_dirs: dict | None, subproject_data: dict) -> di
         "qa_model_profile": (subproject_data.get("qa_model_profile") or "").strip(),
     }
     return normalized
+
+
+def _default_workspace_dir(project_id: str, subproject_id: str) -> str:
+    project_segment = (project_id or "shared").strip().lower() or "shared"
+    subproject_segment = (subproject_id or "subproject").strip().lower() or "subproject"
+    return str(Path(REPO_ROOT) / "workspaces" / project_segment / subproject_segment)
