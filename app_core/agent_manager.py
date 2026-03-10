@@ -348,6 +348,32 @@ def get_team_preset(team_id: str | None) -> dict | None:
     return next((team for team in get_team_status_for(team_id)["presets"] if team.get("id") == team_id), None)
 
 
+def create_team_preset(team_data: dict) -> dict:
+    presets = load_agent_presets()
+    team_id = _slugify_id(team_data.get("id") or team_data.get("label") or "")
+    if not team_id:
+        return {"ok": False, "error": "Team id is required"}
+    if team_id in presets.get("presets", {}):
+        return {"ok": False, "error": "Team already exists"}
+    preset = {
+        "label": team_data.get("label", team_id),
+        "stack_key": _as_stack_key(team_data.get("stack_key")),
+        "stack_name": (team_data.get("stack_name") or _as_stack_key(team_data.get("stack_key")) or "").strip(),
+        "substacks": [_as_substack_key(item) for item in _to_iterable(team_data.get("substacks")) if _as_substack_key(item)],
+        "skills": [str(skill).strip() for skill in _to_iterable(team_data.get("skills")) if str(skill).strip()],
+        "supported_stacks": [_as_stack_key(team_data.get("stack_key"))] if _as_stack_key(team_data.get("stack_key")) else list(_STACK_KEYS),
+        "eligibility": team_data.get("eligibility") or [
+            {"roles": ["pm", "orchestrator"], "stacks": ["*"]},
+            {"roles": ["developer", "qa"], "stacks": [_as_stack_key(team_data.get("stack_key")) or "BACK"]},
+        ],
+        "suggested_counts": team_data.get("suggested_counts") or {"developer": 2, "qa": 1},
+        "subproject_id": team_data.get("subproject_id", ""),
+    }
+    presets.setdefault("presets", {})[team_id] = preset
+    save_agent_presets(presets)
+    return {"ok": True, "team_id": team_id, "team": get_team_preset(team_id)}
+
+
 def suggest_team_for_scope(stack_key: str | None, substack: str | None = None) -> dict | None:
     teams = list_team_presets(stack_key=stack_key, substack=substack)
     requested_substack = _as_substack_key(substack)
@@ -375,6 +401,10 @@ def validate_agent_for_team(agent_data: dict, team_id: str | None) -> tuple[bool
     if specialization not in allowed_skills:
         return False, f"El team '{team.get('label', team_id)}' no permite el skill '{specialization}'."
     return True, ""
+
+
+def _slugify_id(value: str) -> str:
+    return "".join(ch if ch.isalnum() else "_" for ch in (value or "").strip().lower()).strip("_")
 
 
 def system_running() -> bool:

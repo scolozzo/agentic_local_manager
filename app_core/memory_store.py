@@ -49,6 +49,7 @@ class MemoryStore:
                 name TEXT,
                 stack TEXT,
                 project_id TEXT DEFAULT '',
+                subproject_id TEXT DEFAULT '',
                 team_id TEXT DEFAULT '',
                 substack TEXT DEFAULT '',
                 team_snapshot TEXT DEFAULT '{}',
@@ -92,6 +93,11 @@ class MemoryStore:
                 context_json TEXT DEFAULT '{}',
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP
             );
+            CREATE TABLE IF NOT EXISTS platform_runtime_state (
+                state_key TEXT PRIMARY KEY,
+                state_json TEXT DEFAULT '{}',
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );
             """
         )
         try:
@@ -105,6 +111,7 @@ class MemoryStore:
         except sqlite3.OperationalError:
             pass
         for column_name, ddl in (
+            ("subproject_id", "ALTER TABLE sprints ADD COLUMN subproject_id TEXT DEFAULT ''"),
             ("team_id", "ALTER TABLE sprints ADD COLUMN team_id TEXT DEFAULT ''"),
             ("substack", "ALTER TABLE sprints ADD COLUMN substack TEXT DEFAULT ''"),
             ("team_snapshot", "ALTER TABLE sprints ADD COLUMN team_snapshot TEXT DEFAULT '{}'"),
@@ -325,10 +332,35 @@ class MemoryStore:
         return item
 
     def save_project_runtime_state(self, project_id: str, last_sprint_id: str = "", context: dict | None = None) -> None:
+        if not project_id:
+            return
+        current = self.get_project_runtime_state(project_id)
+        merged_context = {**current.get("context", {}), **(context or {})}
         con = self._connect()
         con.execute(
             "INSERT OR REPLACE INTO project_runtime_state (project_id, last_sprint_id, context_json, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
-            (project_id, last_sprint_id, json.dumps(context or {})),
+            (project_id, last_sprint_id, json.dumps(merged_context)),
+        )
+        con.commit()
+        con.close()
+
+    def get_platform_runtime_state(self, state_key: str = "dashboard") -> dict:
+        con = self._connect()
+        row = con.execute("SELECT * FROM platform_runtime_state WHERE state_key = ?", (state_key,)).fetchone()
+        con.close()
+        if not row:
+            return {"state_key": state_key, "state": {}}
+        item = dict(row)
+        item["state"] = json.loads(item.get("state_json") or "{}")
+        return item
+
+    def save_platform_runtime_state(self, state_key: str = "dashboard", state: dict | None = None) -> None:
+        current = self.get_platform_runtime_state(state_key)
+        merged_state = {**current.get("state", {}), **(state or {})}
+        con = self._connect()
+        con.execute(
+            "INSERT OR REPLACE INTO platform_runtime_state (state_key, state_json, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)",
+            (state_key, json.dumps(merged_state)),
         )
         con.commit()
         con.close()

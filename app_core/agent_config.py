@@ -6,6 +6,7 @@ from copy import deepcopy
 from pathlib import Path
 
 from dotenv import load_dotenv
+from app_core.platform_settings import render_platform_rules_prompt
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -176,10 +177,12 @@ def compose_agent_prompt(agent: dict | str, runtime_context: str = "") -> str:
     agent_def = get_agent(agent) if isinstance(agent, str) else normalize_agent_definition(agent, catalog)
     if not agent_def:
         return runtime_context.strip()
+    platform_rules = render_platform_rules_prompt()
     parts = [
         read_prompt_file(agent_def.get("base_prompt")),
         read_prompt_file(agent_def.get("stack_prompt")),
         read_prompt_file(agent_def.get("specialization_prompt")),
+        platform_rules,
         runtime_context.strip(),
     ]
     final_prompt = "\n\n".join(part for part in parts if part)

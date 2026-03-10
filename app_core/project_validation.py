@@ -47,9 +47,8 @@ def validate_project_configuration(project_context: dict, git_dirs: dict | None 
     template = project_context.get("template", {})
     configured_git_dirs = {normalize_stack_key(key): value for key, value in (git_dirs or project_context.get("git_dirs") or {}).items() if value}
 
-    for family, aliases in _REPO_FAMILIES.items():
-        if not any(key in aliases for key in configured_git_dirs):
-            errors.append(f"project requires at least one {family} repository")
+    if not configured_git_dirs:
+        errors.append("project requires at least one repository")
 
     allowed = set(allowed_stacks(project_context))
     active_families = {_STACK_TO_FAMILY[stack] for stack in allowed if stack in _STACK_TO_FAMILY}

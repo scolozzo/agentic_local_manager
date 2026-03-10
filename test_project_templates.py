@@ -57,21 +57,26 @@ def test_project_validation_detects_invalid_stack_configuration():
         "git_dirs": {"BACK": "C:/repos/backend"},
     }
     errors = validate_project_configuration(context)
-    assert "project requires at least one front_web repository" in errors
-    assert "project requires at least one mobile repository" in errors
     assert "project has no repository configured for the template active stack" in errors
 
 
-def test_project_validation_accepts_backend_web_and_mobile_repo_families():
+def test_project_validation_accepts_single_repo_for_allowed_stack():
     context = {
         "template": {"allowed_stacks": ["BO"], "required_roles": ["pm", "developer"]},
         "git_dirs": {
-            "BACK": "C:/repos/backend",
             "WEB_BACKOFFICE": "C:/repos/backoffice",
-            "ANDROID": "C:/repos/android",
         },
     }
     assert validate_project_configuration(context) == []
+
+
+def test_project_validation_requires_at_least_one_repo():
+    context = {
+        "template": {"allowed_stacks": ["BACK"], "required_roles": ["pm", "developer"]},
+        "git_dirs": {},
+    }
+    errors = validate_project_configuration(context)
+    assert "project requires at least one repository" in errors
 
 
 def test_project_stack_resolution_uses_template_default():

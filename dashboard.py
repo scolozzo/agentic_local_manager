@@ -5,6 +5,8 @@ python dashboard.py → http://localhost:8888
 """
 
 import os, sys, json, sqlite3, threading, webbrowser, subprocess, cgi
+import re
+import unicodedata
 from pathlib import Path
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from datetime import datetime
@@ -17,7 +19,7 @@ from app_core.agent_manager import (
     load_agents, load_specializations, get_log, get_current_task,
     get_agent, start_agent, stop_agent, start_all, stop_all, is_running,
     add_agent, remove_agent, system_running, get_team_status_for,
-    get_agents_with_eligibility, get_team_preset, list_team_presets, set_agents_enabled_for_stack,
+    create_team_preset, get_agents_with_eligibility, get_team_preset, list_team_presets, set_agents_enabled_for_stack,
     suggest_team_for_scope, update_agent, validate_agent_for_team,
     set_agent_enabled,
     get_schedule, save_schedule, start_scheduler,
@@ -25,6 +27,8 @@ from app_core.agent_manager import (
 from app_core.alert_manager import get_active_alerts, clear_alert
 from app_core.memory_store import MemoryStore
 from app_core.project_context import require_project_context, resolve_project_context, set_active_project_id
+from app_core.platform_settings import load_platform_settings, save_platform_settings
+from app_core.project_subprojects import get_subproject_definition, normalize_project_subprojects
 from app_core.project_templates import get_workflow_definition, get_project_template, list_project_templates
 from app_core.project_validation import validate_project_configuration, resolve_stack_for_project
 
@@ -54,6 +58,13 @@ def _preview_project_context(
     }
     context["validation_errors"] = validate_project_configuration(context)
     return context
+
+
+def _generate_project_id(name: str) -> str:
+    normalized = unicodedata.normalize("NFD", (name or "").strip())
+    ascii_name = "".join(ch for ch in normalized if unicodedata.category(ch) != "Mn")
+    project_id = re.sub(r"[^A-Z0-9]+", "_", ascii_name.upper()).strip("_")
+    return project_id[:32]
 
 # ── Cargar .env ────────────────────────────────────────────────────────────────
 env_path = BASE_DIR / "VeloxIq" / ".env"
@@ -134,11 +145,11 @@ def get_local_board_data(sprint_id: str = "", project_id: str = "") -> dict:
     stacks  = {k: {"total": 0, "verified": 0, "by_state": {}} for k in ["BACK", "BO", "MOB"]}
     parsed  = []
     sprints = []
-    active_sprint = {"name": "Sprint Local", "sprint_id": "", "stack": "", "team_id": "", "substack": ""}
+    active_sprint = {"name": "Sprint Local", "sprint_id": "", "stack": "", "team_id": "", "substack": "", "subproject_id": ""}
 
     if not project_id:
         _board_cache = {
-            "active_sprint": {"name": "Sin proyecto", "sprint_id": "", "stack": "", "project_id": "", "team_id": "", "substack": ""},
+            "active_sprint": {"name": "Sin proyecto", "sprint_id": "", "stack": "", "project_id": "", "team_id": "", "substack": "", "subproject_id": ""},
             "issues":  [],
             "stacks":  stacks,
             "sprints": [],
@@ -154,17 +165,17 @@ def get_local_board_data(sprint_id: str = "", project_id: str = "") -> dict:
             # Load sprints list
             if project_id:
                 sprint_rows = con.execute(
-                    "SELECT sprint_id, name, stack, status, project_id, team_id, substack FROM sprints WHERE project_id = ? ORDER BY created_at DESC",
+                    "SELECT sprint_id, name, stack, status, project_id, subproject_id, team_id, substack FROM sprints WHERE project_id = ? ORDER BY created_at DESC",
                     (project_id,),
                 ).fetchall()
             else:
                 sprint_rows = con.execute(
-                    "SELECT sprint_id, name, stack, status, project_id, team_id, substack FROM sprints ORDER BY created_at DESC"
+                    "SELECT sprint_id, name, stack, status, project_id, subproject_id, team_id, substack FROM sprints ORDER BY created_at DESC"
                 ).fetchall()
             for sr in sprint_rows:
-                sprints.append({"sprint_id": sr[0], "name": sr[1], "stack": sr[2], "status": sr[3], "project_id": sr[4], "team_id": sr[5], "substack": sr[6]})
+                sprints.append({"sprint_id": sr[0], "name": sr[1], "stack": sr[2], "status": sr[3], "project_id": sr[4], "subproject_id": sr[5], "team_id": sr[6], "substack": sr[7]})
                 if sr[3] == "active" and not sprint_id:
-                    active_sprint = {"name": sr[1], "sprint_id": sr[0], "stack": sr[2], "project_id": sr[4], "team_id": sr[5], "substack": sr[6]}
+                    active_sprint = {"name": sr[1], "sprint_id": sr[0], "stack": sr[2], "project_id": sr[4], "subproject_id": sr[5], "team_id": sr[6], "substack": sr[7]}
 
             # Load tasks filtered by sprint
             if sprint_id:
@@ -184,7 +195,7 @@ def get_local_board_data(sprint_id: str = "", project_id: str = "") -> dict:
                 # Sprint name for selected sprint
                 for sr in sprints:
                     if sr["sprint_id"] == sprint_id:
-                        active_sprint = {"name": sr["name"], "sprint_id": sprint_id, "stack": sr["stack"], "project_id": sr["project_id"], "team_id": sr.get("team_id", ""), "substack": sr.get("substack", "")}
+                        active_sprint = {"name": sr["name"], "sprint_id": sprint_id, "stack": sr["stack"], "project_id": sr["project_id"], "subproject_id": sr.get("subproject_id", ""), "team_id": sr.get("team_id", ""), "substack": sr.get("substack", "")}
             else:
                 if project_id:
                     rows = con.execute(
@@ -244,6 +255,7 @@ def build_data(sprint_id: str = "") -> dict:
     project_context = resolve_project_context(memory_store)
     runtime_state = memory_store.get_project_runtime_state(project_context.get("project_id", "")) if project_context.get("project_id") else {"last_sprint_id": "", "context": {}}
     effective_sprint_id = sprint_id or runtime_state.get("last_sprint_id", "")
+    platform_state = memory_store.get_platform_runtime_state("dashboard")
     yt         = get_local_board_data(effective_sprint_id, project_context.get("project_id", ""))
     tc         = local_token_stats()
     endpoints  = local_certified_endpoints()
@@ -268,6 +280,8 @@ def build_data(sprint_id: str = "") -> dict:
         })
     alerts = get_active_alerts(yt_url="", yt_token="",
                                bot_token=TELEGRAM_BOT_TOKEN, chat_id=TELEGRAM_CHAT_ID)
+    subprojects = normalize_project_subprojects(project_context.get("git_dirs", {}))
+    platform_settings = load_platform_settings()
     return {"agents":agents_out,"yt":yt,"tc":tc,"endpoints":endpoints,
             "schedule":schedule,"sys_running":system_running(),
             "updated_at":datetime.now().strftime("%H:%M:%S"),
@@ -275,7 +289,10 @@ def build_data(sprint_id: str = "") -> dict:
             "alerts":alerts,"team":team_status,"active_stack":active_stack,
             "project":project_context,"templates":list_project_templates(),
             "runtime_state": runtime_state,
-            "available_teams": list_team_presets()}
+            "available_teams": list_team_presets(),
+            "platform_state": platform_state,
+            "platform_settings": platform_settings,
+            "subprojects": subprojects}
 
 # ── Abrir terminal PowerShell con tail del log del agente ─────────────────────
 def open_terminal(agent_id: str) -> dict:
@@ -316,6 +333,8 @@ def render(data: dict) -> str:
     active_team = get_team_preset(team.get("active_preset")) or {}
     runtime_state = data.get("runtime_state", {})
     available_teams = data.get("available_teams", [])
+    platform_settings = data.get("platform_settings", {})
+    subprojects = data.get("subprojects", [])
 
     def pct(s): return int(s["verified"]/s["total"]*100) if s["total"] else 0
     def badges(by_state):
@@ -464,6 +483,15 @@ def render(data: dict) -> str:
     flutter_value = (active_git_dirs.get("FLUTTER", "") or "").replace('"', "&quot;")
     team_badge = active_team.get("label", "Sin equipo asignado")
     team_scope = " / ".join(item for item in [active_team.get("stack_key", active_stack), active.get("substack", "")] if item)
+    def textarea_escape(text: str) -> str:
+        return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    coding_rules_value = textarea_escape("\n".join(platform_settings.get("coding_rules", [])))
+    git_rules_value = textarea_escape("\n".join(platform_settings.get("git_rules", [])))
+    token_rules_value = textarea_escape("\n".join(platform_settings.get("token_optimization_rules", [])))
+    subproject_options = "".join(
+        f'<option value="{subproject["id"]}" data-stack="{subproject.get("stack_key","")}" data-substack="{subproject.get("substack","")}">{subproject.get("label", subproject["id"])} · {subproject.get("repo_dir","")}</option>'
+        for subproject in subprojects
+    ) or '<option value="">No hay subproyectos configurados</option>'
 
     sys_run = data["sys_running"]
     raw_alerts = data.get("alerts", [])
@@ -555,6 +583,11 @@ code{{background:#0f172a;padding:2px 4px;border-radius:3px;font-size:11px}}
 label{{display:block;font-size:11px;color:#94a3b8;margin-bottom:3px}}
 select,input[type=text]{{width:100%;background:#0f172a;border:1px solid #334155;border-radius:5px;padding:7px 9px;color:#e2e8f0;font-size:12px}}
 .modal-actions{{display:flex;gap:7px;margin-top:14px;justify-content:flex-end}}
+.config-group{{margin-bottom:14px;border:1px solid #334155;border-radius:10px;background:#0f172a}}
+.config-group summary{{cursor:pointer;list-style:none;padding:12px 14px;font-size:12px;font-weight:700;color:#cbd5e1;display:flex;align-items:center;justify-content:space-between}}
+.config-group summary::-webkit-details-marker{{display:none}}
+.config-group[open] summary{{border-bottom:1px solid #334155}}
+.config-group-body{{padding:14px}}
 .alert-panel{{margin-bottom:14px}}
 .alert-card{{display:flex;align-items:center;gap:10px;background:#450a0a;border:1px solid #ef444477;border-radius:8px;padding:9px 13px;margin-bottom:7px}}
 .alert-icon{{font-size:16px}}
@@ -682,85 +715,99 @@ select,input[type=text]{{width:100%;background:#0f172a;border:1px solid #334155;
   <div class="modal" style="width:600px;max-height:90vh;overflow-y:auto">
     <h3>Configuracion del Sistema</h3>
 
-    <!-- TAB 1: PROYECTOS -->
-    <div style="margin-bottom:20px;border-bottom:1px solid #334155;padding-bottom:15px">
-      <h4 style="font-size:13px;color:#94a3b8;margin-bottom:10px">PROYECTOS</h4>
-      <div id="project-list" style="max-height:150px;overflow-y:auto;margin-bottom:12px"></div>
+    <details class="config-group" open>
+      <summary>Proyecto Activo Y Alta Rapida <span style="font-size:11px;color:#64748b">obligatorio minimo</span></summary>
+      <div class="config-group-body">
+        <div id="project-list" style="max-height:150px;overflow-y:auto;margin-bottom:12px"></div>
+        <div class="fg">
+          <label>Nombre del Proyecto</label>
+          <input type="text" id="new-proj-name" placeholder="Nombre completo" oninput="updateGeneratedProjectId()">
+        </div>
+        <div class="fg">
+          <label>Descripcion</label>
+          <input type="text" id="new-proj-desc" placeholder="Detalles del proyecto">
+        </div>
+        <div class="fg">
+          <label>ID generado</label>
+          <input type="text" id="new-proj-id" placeholder="Se genera automaticamente" readonly>
+        </div>
+        <div class="fg">
+          <label>Tipo de subproyecto inicial</label>
+          <select id="new-proj-subproject">
+            <option value="BACK">Backend</option>
+            <option value="WEB_BACKOFFICE">Front Web - Backoffice</option>
+            <option value="WEB_LANDING">Front Web - Landing</option>
+            <option value="ANDROID">Mobile - Android</option>
+            <option value="IOS">Mobile - iOS</option>
+            <option value="FLUTTER">Mobile - Flutter</option>
+          </select>
+        </div>
+        <div class="fg">
+          <label>Repositorio inicial</label>
+          <input type="text" id="new-proj-repo" placeholder="C:\\Users\\...\\repos\\mi-subproyecto">
+        </div>
+        <button class="btn btn-green" onclick="createProject()" style="width:100%">Crear Proyecto</button>
+      </div>
+    </details>
 
-      <div class="fg">
-        <label>ID del Proyecto</label>
-        <input type="text" id="new-proj-id" placeholder="Ej: SEGURO, ACME">
+    <details class="config-group">
+      <summary>Repos Adicionales Del Proyecto <span style="font-size:11px;color:#64748b">opcional</span></summary>
+      <div class="config-group-body">
+        <div style="font-size:11px;color:#64748b;margin-bottom:10px">Agrega o actualiza repos adicionales para el proyecto seleccionado. Solo se requiere al menos uno para crear el proyecto.</div>
+        <div class="fg">
+          <label>BACK (FastAPI · PostgreSQL)</label>
+          <input type="text" id="git-back" value="{back_value}" placeholder="C:\\Users\\...\\repos\\backend">
+        </div>
+        <div class="fg">
+          <label>Front Web - Backoffice</label>
+          <input type="text" id="git-web-bo" value="{web_bo_value}" placeholder="C:\\Users\\...\\repos\\backoffice">
+        </div>
+        <div class="fg">
+          <label>Front Web - Landing (opcional)</label>
+          <input type="text" id="git-web-landing" value="{web_landing_value}" placeholder="C:\\Users\\...\\repos\\landing">
+        </div>
+        <div class="fg">
+          <label>Mobile - Android</label>
+          <input type="text" id="git-android" value="{android_value}" placeholder="C:\\Users\\...\\repos\\android">
+        </div>
+        <div class="fg">
+          <label>Mobile - iOS (opcional)</label>
+          <input type="text" id="git-ios" value="{ios_value}" placeholder="C:\\Users\\...\\repos\\ios">
+        </div>
+        <div class="fg">
+          <label>Mobile - Flutter (opcional)</label>
+          <input type="text" id="git-flutter" value="{flutter_value}" placeholder="C:\\Users\\...\\repos\\flutter">
+        </div>
+        <button class="btn btn-green" onclick="saveGitDirs()" style="width:100%">Guardar Directorios</button>
       </div>
-      <div class="fg">
-        <label>Nombre del Proyecto</label>
-        <input type="text" id="new-proj-name" placeholder="Nombre completo">
-      </div>
-      <div class="fg">
-        <label>Descripcion (opcional)</label>
-        <input type="text" id="new-proj-desc" placeholder="Detalles del proyecto">
-      </div>
-      <div class="fg">
-        <label>Repo Backend</label>
-        <input type="text" id="new-proj-back" placeholder="C:\\Users\\...\\repos\\backend">
-      </div>
-      <div class="fg">
-        <label>Repo Front Web - Backoffice</label>
-        <input type="text" id="new-proj-web-bo" placeholder="C:\\Users\\...\\repos\\backoffice">
-      </div>
-      <div class="fg">
-        <label>Repo Front Web - Landing (opcional)</label>
-        <input type="text" id="new-proj-web-landing" placeholder="C:\\Users\\...\\repos\\landing">
-      </div>
-      <div class="fg">
-        <label>Repo Mobile - Android</label>
-        <input type="text" id="new-proj-android" placeholder="C:\\Users\\...\\repos\\android">
-      </div>
-      <div class="fg">
-        <label>Repo Mobile - iOS (opcional)</label>
-        <input type="text" id="new-proj-ios" placeholder="C:\\Users\\...\\repos\\ios">
-      </div>
-      <div class="fg">
-        <label>Repo Mobile - Flutter (opcional)</label>
-        <input type="text" id="new-proj-flutter" placeholder="C:\\Users\\...\\repos\\flutter">
-      </div>
-      <button class="btn btn-green" onclick="createProject()" style="width:100%">Crear Proyecto</button>
-    </div>
+    </details>
 
-    <!-- TAB 2: DIRECTORIOS GIT -->
-    <div style="margin-bottom:20px;border-bottom:1px solid #334155;padding-bottom:15px">
-      <h4 style="font-size:13px;color:#94a3b8;margin-bottom:10px">DIRECTORIOS GIT (Rutas locales)</h4>
-      <div class="fg">
-        <label>BACK (FastAPI · PostgreSQL)</label>
-        <input type="text" id="git-back" value="{back_value}" placeholder="C:\\Users\\...\\repos\\backend">
+    <details class="config-group">
+      <summary>Modelos Y API Keys <span style="font-size:11px;color:#64748b">informativo</span></summary>
+      <div class="config-group-body">
+        <div style="font-size:11px;color:#94a3b8">Providers soportados por entorno: {provider_keys}</div>
+        <div style="font-size:10px;color:#64748b;margin-top:6px">Las API keys se leen desde variables de entorno. Esta seccion es informativa.</div>
       </div>
-      <div class="fg">
-        <label>Front Web - Backoffice</label>
-        <input type="text" id="git-web-bo" value="{web_bo_value}" placeholder="C:\\Users\\...\\repos\\backoffice">
-      </div>
-      <div class="fg">
-        <label>Front Web - Landing (opcional)</label>
-        <input type="text" id="git-web-landing" value="{web_landing_value}" placeholder="C:\\Users\\...\\repos\\landing">
-      </div>
-      <div class="fg">
-        <label>Mobile - Android</label>
-        <input type="text" id="git-android" value="{android_value}" placeholder="C:\\Users\\...\\repos\\android">
-      </div>
-      <div class="fg">
-        <label>Mobile - iOS (opcional)</label>
-        <input type="text" id="git-ios" value="{ios_value}" placeholder="C:\\Users\\...\\repos\\ios">
-      </div>
-      <div class="fg">
-        <label>Mobile - Flutter (opcional)</label>
-        <input type="text" id="git-flutter" value="{flutter_value}" placeholder="C:\\Users\\...\\repos\\flutter">
-      </div>
-      <button class="btn btn-green" onclick="saveGitDirs()" style="width:100%">Guardar Directorios</button>
-    </div>
+    </details>
 
-    <div style="margin-bottom:20px">
-      <h4 style="font-size:13px;color:#94a3b8;margin-bottom:10px">MODELOS / API KEYS</h4>
-      <div style="font-size:11px;color:#94a3b8">Providers soportados por entorno: {provider_keys}</div>
-      <div style="font-size:10px;color:#64748b;margin-top:6px">Las API keys se leen desde variables de entorno. Esta seccion es informativa.</div>
-    </div>
+    <details class="config-group">
+      <summary>Reglas Globales De Plataforma <span style="font-size:11px;color:#64748b">persisten para todos los proyectos</span></summary>
+      <div class="config-group-body">
+        <div class="fg">
+          <label>Politicas generales de codificacion</label>
+          <textarea id="platform-coding-rules" style="width:100%;height:100px;background:#0f172a;border:1px solid #334155;border-radius:5px;padding:7px;color:#e2e8f0;font-size:12px;resize:vertical">{coding_rules_value}</textarea>
+        </div>
+        <div class="fg">
+          <label>Politicas generales de ramas y git</label>
+          <textarea id="platform-git-rules" style="width:100%;height:100px;background:#0f172a;border:1px solid #334155;border-radius:5px;padding:7px;color:#e2e8f0;font-size:12px;resize:vertical">{git_rules_value}</textarea>
+        </div>
+        <div class="fg">
+          <label>Politicas de optimizacion de tokens</label>
+          <textarea id="platform-token-rules" style="width:100%;height:100px;background:#0f172a;border:1px solid #334155;border-radius:5px;padding:7px;color:#e2e8f0;font-size:12px;resize:vertical">{token_rules_value}</textarea>
+        </div>
+        <button class="btn btn-green" onclick="savePlatformSettings()" style="width:100%">Guardar Reglas Globales</button>
+      </div>
+    </details>
 
     <div class="modal-actions">
       <button class="btn btn-gray" onclick="closeConfigModal()">Cerrar</button>
@@ -781,29 +828,43 @@ select,input[type=text]{{width:100%;background:#0f172a;border:1px solid #334155;
       <input type="text" id="sprint-name" placeholder="Sprint 2 - Autenticación">
     </div>
     <div class="fg">
-      <label>Stack</label>
-      <select id="sprint-stack" onchange="refreshSprintTeams()">
-        <option value="BACK">BACK (FastAPI)</option>
-        <option value="BO">BO (Next.js)</option>
-        <option value="MOB">MOB (Android)</option>
+      <label>Subproyecto</label>
+      <select id="sprint-subproject" onchange="refreshSprintScope()">
+        {subproject_options}
       </select>
+    </div>
+    <div class="fg">
+      <label>Stack operativo</label>
+      <input type="text" id="sprint-stack" readonly>
     </div>
     <div class="fg">
       <label>Substack</label>
-      <select id="sprint-substack" onchange="refreshSprintTeams()">
-        <option value="">General</option>
-        <option value="api">API</option>
-        <option value="db">DB</option>
-        <option value="backoffice">Backoffice</option>
-        <option value="landing">Landing</option>
-        <option value="android">Android</option>
-        <option value="ios">iOS</option>
-        <option value="flutter">Flutter</option>
-      </select>
+      <input type="text" id="sprint-substack" readonly>
     </div>
     <div class="fg">
+      <label>Modo de equipo</label>
+      <select id="sprint-team-mode" onchange="toggleTeamMode()">
+        <option value="reuse">Reutilizar perfil existente</option>
+        <option value="create">Crear perfil nuevo</option>
+      </select>
+    </div>
+    <div class="fg" id="reuse-team-group">
       <label>Equipo asignado</label>
       <select id="sprint-team"></select>
+    </div>
+    <div id="create-team-group" style="display:none">
+      <div class="fg">
+        <label>Nombre del nuevo equipo</label>
+        <input type="text" id="new-team-label" placeholder="Ej: Mobile Android Premium">
+      </div>
+      <div class="fg">
+        <label>Nombre del stack del equipo</label>
+        <input type="text" id="new-team-stack-name" placeholder="Ej: Android Kotlin">
+      </div>
+      <div class="fg">
+        <label>Skills del equipo</label>
+        <select id="new-team-skills" multiple style="height:110px"></select>
+      </div>
     </div>
     <div class="fg">
       <label style="display:flex;align-items:center;gap:7px">
@@ -828,8 +889,21 @@ const TEAM_PRESETS = {json.dumps(available_teams)};
 const ACTIVE_PROJECT_ID = {json.dumps(project.get("project_id", ""))};
 const ACTIVE_SPRINT_ID = {json.dumps(active.get("sprint_id", ""))};
 const ACTIVE_TEAM_ID = {json.dumps(active_team.get("id", ""))};
+const ACTIVE_SUBPROJECT_ID = {json.dumps(active.get("subproject_id") or runtime_state.get("context", {}).get("subproject_id", ""))};
+const SUBPROJECTS = {json.dumps(subprojects)};
+const SPRINTS = {json.dumps(sprints)};
+let sprintScopeInitialized = false;
 
-setInterval(()=>{{let c=document.getElementById('cd');c.textContent=+c.textContent-1;if(+c.textContent<=0)location.reload();}},1000);
+function hasOpenModal(){{
+  return ['mbg','config-modal-bg','sprint-modal-bg'].some(id=>document.getElementById(id)?.classList.contains('open'));
+}}
+
+setInterval(()=>{{
+  let c=document.getElementById('cd');
+  if(!c||hasOpenModal())return;
+  c.textContent=+c.textContent-1;
+  if(+c.textContent<=0)location.reload();
+}},1000);
 
 async function systemToggle(){{await fetch('/api/system/{("stop" if sys_run else "start")}',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{team_id:ACTIVE_TEAM_ID}})}});location.reload();}}
 
@@ -871,6 +945,21 @@ function updModels(){{
 }}
 updModels();
 
+function slugifyProjectId(name){{
+  return (name||'')
+    .normalize('NFD').replace(/[\\u0300-\\u036f]/g,'')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g,'_')
+    .replace(/^_+|_+$/g,'')
+    .slice(0,32);
+}}
+
+function updateGeneratedProjectId(){{
+  const name=document.getElementById('new-proj-name')?.value||'';
+  const idField=document.getElementById('new-proj-id');
+  if(idField)idField.value=slugifyProjectId(name);
+}}
+
 function refreshSpecializationOptions(){{
   const type=document.getElementById('nt')?.value||'dev';
   const select=document.getElementById('ns');
@@ -894,7 +983,47 @@ function refreshSprintTeams(){{
   const teams=TEAM_PRESETS.filter(team=>((team.stack_key||'')===stack||!stack) && (!substack || !(team.substacks||[]).length || (team.substacks||[]).includes(substack)));
   sel.innerHTML=teams.map(team=>`<option value="${{team.id}}">${{team.label}}${{team.substacks?.length ? ' · '+team.substacks.join(', ') : ''}}</option>`).join('');
 }}
-refreshSprintTeams();
+
+function refreshTeamSkills(){{
+  const subprojectId=document.getElementById('sprint-subproject')?.value||'';
+  const stack=document.getElementById('sprint-stack')?.value||'';
+  const select=document.getElementById('new-team-skills');
+  if(!select)return;
+  const allowed=Object.entries(SPECS).filter(([key, spec])=>spec.role==='developer' && (spec.stack_key||'')===stack);
+  select.innerHTML=allowed.map(([key, spec])=>`<option value="${{key}}">${{spec.label}}</option>`).join('');
+  const suggested=TEAM_PRESETS.find(team=>((team.stack_key||'')===stack) && (!(team.substacks||[]).length || (team.substacks||[]).includes(document.getElementById('sprint-substack')?.value||'')));
+  if(suggested){{
+    Array.from(select.options).forEach(option=>option.selected=(suggested.skills||[]).includes(option.value));
+  }}
+  const stackName=document.getElementById('new-team-stack-name');
+  if(stackName && !stackName.value){{
+    const subproject=SUBPROJECTS.find(item=>item.id===subprojectId);
+    stackName.value=subproject?.stack_name||stack||'';
+  }}
+}}
+
+function refreshSprintScope(){{
+  const subprojectSelect=document.getElementById('sprint-subproject');
+  if(subprojectSelect && !sprintScopeInitialized && ACTIVE_SUBPROJECT_ID && subprojectSelect.value!==ACTIVE_SUBPROJECT_ID){{
+    subprojectSelect.value=ACTIVE_SUBPROJECT_ID;
+  }}
+  sprintScopeInitialized = true;
+  const subprojectId=document.getElementById('sprint-subproject')?.value||'';
+  const subproject=SUBPROJECTS.find(item=>item.id===subprojectId);
+  document.getElementById('sprint-stack').value=subproject?.stack_key||'';
+  document.getElementById('sprint-substack').value=subproject?.substack||'';
+  refreshSprintTeams();
+  refreshTeamSkills();
+}}
+
+function toggleTeamMode(){{
+  const mode=document.getElementById('sprint-team-mode')?.value||'reuse';
+  document.getElementById('reuse-team-group').style.display=mode==='reuse'?'block':'none';
+  document.getElementById('create-team-group').style.display=mode==='create'?'block':'none';
+}}
+
+refreshSprintScope();
+toggleTeamMode();
 
 async function addAgent(){{
   const spec=document.getElementById('ns').value;
@@ -933,9 +1062,30 @@ async function saveSchedule(){{
   document.getElementById('ss').textContent='Guardado \u2713';
 }}
 
+async function savePlatformSettings(){{
+  const coding=document.getElementById('platform-coding-rules').value;
+  const git=document.getElementById('platform-git-rules').value;
+  const token=document.getElementById('platform-token-rules').value;
+  const r=await fetch('/api/platform-settings',{{method:'POST',headers:{{'Content-Type':'application/json'}},
+    body:JSON.stringify({{
+      coding_rules:coding.split('\\n'),
+      git_rules:git.split('\\n'),
+      token_optimization_rules:token.split('\\n')
+    }})}});
+  const d=await r.json();
+  if(!d.ok){{alert('Error: '+(d.error||''));return;}}
+  alert('Reglas globales guardadas');
+}}
+
 function filterSprint(sprintId){{
+  const sprint=SPRINTS.find(item=>item.sprint_id===sprintId) || null;
   if(ACTIVE_PROJECT_ID){{
-    fetch('/api/projects/runtime',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{project_id:ACTIVE_PROJECT_ID,last_sprint_id:sprintId}})}}).catch(()=>null);
+    fetch('/api/projects/runtime',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{
+      project_id:ACTIVE_PROJECT_ID,
+      last_sprint_id:sprintId,
+      team_id:sprint?.team_id||ACTIVE_TEAM_ID,
+      subproject_id:sprint?.subproject_id||''
+    }})}}).catch(()=>null);
   }}
   const url=new URL(window.location.href);
   if(sprintId)url.searchParams.set('sprint',sprintId);
@@ -1008,7 +1158,13 @@ async function loadProjectList(){{
 
 async function selectProject(projectId){{
   const r=await fetch('/api/projects/active',{{method:'POST',headers:{{'Content-Type':'application/json'}},
-    body:JSON.stringify({{project_id:projectId,previous_project_id:ACTIVE_PROJECT_ID,previous_sprint_id:(document.getElementById('sprint-sel')?.value||ACTIVE_SPRINT_ID)}})}});
+    body:JSON.stringify({{
+      project_id:projectId,
+      previous_project_id:ACTIVE_PROJECT_ID,
+      previous_sprint_id:(document.getElementById('sprint-sel')?.value||ACTIVE_SPRINT_ID),
+      previous_team_id:ACTIVE_TEAM_ID,
+      previous_subproject_id:(document.getElementById('sprint-subproject')?.value||'')
+    }})}});
   const d=await r.json();
   if(!d.ok){{alert('Error: '+(d.error||''));return;}}
   window.location.href=d.redirect_url||window.location.href.split('?')[0];
@@ -1020,20 +1176,12 @@ async function createProject(){{
   const desc=document.getElementById('new-proj-desc').value.trim();
   const template_id=document.getElementById('project-template-sel').value;
   const git_dirs={{}};
-  const back=document.getElementById('new-proj-back').value.trim();
-  const webBo=document.getElementById('new-proj-web-bo').value.trim();
-  const webLanding=document.getElementById('new-proj-web-landing').value.trim();
-  const android=document.getElementById('new-proj-android').value.trim();
-  const ios=document.getElementById('new-proj-ios').value.trim();
-  const flutter=document.getElementById('new-proj-flutter').value.trim();
-  if(back) git_dirs.BACK=back;
-  if(webBo) git_dirs.WEB_BACKOFFICE=webBo;
-  if(webLanding) git_dirs.WEB_LANDING=webLanding;
-  if(android) git_dirs.ANDROID=android;
-  if(ios) git_dirs.IOS=ios;
-  if(flutter) git_dirs.FLUTTER=flutter;
-  if(!id||!name){{alert('ID y Nombre son requeridos');return;}}
-  if(!back||(!webBo&&!webLanding)||(!android&&!ios&&!flutter)){{alert('Proyecto requiere al menos Backend, Front Web y Mobile');return;}}
+  const subproject=document.getElementById('new-proj-subproject').value;
+  const repo=document.getElementById('new-proj-repo').value.trim();
+  if(repo) git_dirs[subproject]=repo;
+  if(!name||!desc){{alert('Nombre y descripcion son requeridos');return;}}
+  if(!id){{alert('No se pudo generar un ID valido para el proyecto');return;}}
+  if(!repo){{alert('Debes indicar un repositorio inicial para un subproyecto');return;}}
   const r=await fetch('/api/projects/create',{{method:'POST',headers:{{'Content-Type':'application/json'}},
     body:JSON.stringify({{project_id:id,name,description:desc,git_dirs,template_id}})}});
   const d=await r.json();
@@ -1042,12 +1190,7 @@ async function createProject(){{
     document.getElementById('new-proj-id').value='';
     document.getElementById('new-proj-name').value='';
     document.getElementById('new-proj-desc').value='';
-    document.getElementById('new-proj-back').value='';
-    document.getElementById('new-proj-web-bo').value='';
-    document.getElementById('new-proj-web-landing').value='';
-    document.getElementById('new-proj-android').value='';
-    document.getElementById('new-proj-ios').value='';
-    document.getElementById('new-proj-flutter').value='';
+    document.getElementById('new-proj-repo').value='';
     loadProjectList();
     location.reload();
   }}
@@ -1069,7 +1212,7 @@ async function saveGitDirs(){{
   if(ios) git_dirs.IOS=ios;
   if(flutter) git_dirs.FLUTTER=flutter;
   if(!ACTIVE_PROJECT_ID){{alert('Debes seleccionar un proyecto');return;}}
-  if(!back||(!webBo&&!webLanding)||(!android&&!ios&&!flutter)){{alert('Debes configurar al menos Backend, Front Web y Mobile');return;}}
+  if(!Object.keys(git_dirs).length){{alert('Debes configurar al menos un repositorio');return;}}
 
   const r=await fetch('/api/projects/'+ACTIVE_PROJECT_ID+'/config',{{method:'POST',headers:{{'Content-Type':'application/json'}},
     body:JSON.stringify({{git_dirs}})}});
@@ -1103,10 +1246,13 @@ async function createSprint(){{
   const name=document.getElementById('sprint-name').value.trim();
   const stack=document.getElementById('sprint-stack').value;
   const substack=document.getElementById('sprint-substack').value;
-  const team_id=document.getElementById('sprint-team').value;
+  const subproject_id=document.getElementById('sprint-subproject').value;
+  const team_mode=document.getElementById('sprint-team-mode').value;
+  const team_id=team_mode==='reuse' ? document.getElementById('sprint-team').value : '';
   const tasksJson=document.getElementById('sprint-tasks').value.trim();
   if(!id||!name){{alert('Sprint ID y Nombre requeridos');return;}}
-  if(!team_id){{alert('Debes asignar un equipo al sprint');return;}}
+  if(!subproject_id){{alert('Debes seleccionar un subproyecto');return;}}
+  if(team_mode==='reuse' && !team_id){{alert('Debes asignar un equipo al sprint');return;}}
   let tasks=[];
   try{{
     tasks=tasksJson?JSON.parse(tasksJson):[];
@@ -1114,8 +1260,17 @@ async function createSprint(){{
     alert('Error en JSON de tareas: '+e.message);
     return;
   }}
+  const create_team=team_mode==='create' ? {{
+    label:document.getElementById('new-team-label').value.trim(),
+    stack_key:stack,
+    stack_name:document.getElementById('new-team-stack-name').value.trim()||stack,
+    substacks:[substack].filter(Boolean),
+    subproject_id,
+    skills:Array.from(document.getElementById('new-team-skills').selectedOptions).map(option=>option.value)
+  }} : null;
+  if(team_mode==='create' && (!create_team.label || !create_team.skills.length)){{alert('Debes definir nombre y skills para el nuevo equipo');return;}}
   const r=await fetch('/api/sprints/create',{{method:'POST',headers:{{'Content-Type':'application/json'}},
-    body:JSON.stringify({{project_id:ACTIVE_PROJECT_ID,sprint_id:id,name,stack,substack,team_id,tasks}})}});
+    body:JSON.stringify({{project_id:ACTIVE_PROJECT_ID,sprint_id:id,name,stack,substack,subproject_id,team_id,tasks,create_team}})}});
   const d=await r.json();
   if(d.ok){{alert('Sprint '+id+' creado con '+d.result.tasks_created+' tareas');closeSprintModal();location.reload();}}
   else alert('Error: '+(d.error||''));
@@ -1208,8 +1363,10 @@ class Handler(BaseHTTPRequestHandler):
             self._json(MemoryStore().project_list())
         elif p == "/api/projects/create":
             try:
+                project_id = body.get("project_id", "") or _generate_project_id(body.get("name", ""))
+                body["project_id"] = project_id
                 preview = _preview_project_context(
-                    project_id=body.get("project_id", ""),
+                    project_id=project_id,
                     name=body.get("name", ""),
                     description=body.get("description", ""),
                     template_id=body.get("template_id", "software_delivery_default"),
@@ -1220,18 +1377,21 @@ class Handler(BaseHTTPRequestHandler):
                     self._json({"ok": False, "error": "; ".join(preview["validation_errors"])}, 400)
                     return
                 store = MemoryStore()
-                if store.get_project(body.get("project_id", "")):
+                if not project_id:
+                    self._json({"ok": False, "error": "No se pudo generar un ID valido para el proyecto."}, 400)
+                    return
+                if store.get_project(project_id):
                     self._json({"ok": False, "error": "El proyecto ya existe."}, 400)
                     return
                 store.project_create(
-                    body.get("project_id", ""),
+                    project_id,
                     body.get("name", ""),
                     body.get("description", ""),
                     body.get("git_dirs", {}),
                     body.get("template_id", "software_delivery_default"),
                 )
-                set_active_project_id(body.get("project_id", ""))
-                self._json({"ok": True})
+                set_active_project_id(project_id)
+                self._json({"ok": True, "project_id": project_id})
             except Exception as e:
                 self._json({"ok": False, "error": str(e)}, 400)
         elif p == "/api/projects/active":
@@ -1244,7 +1404,14 @@ class Handler(BaseHTTPRequestHandler):
                 previous_project_id = body.get("previous_project_id", "")
                 previous_sprint_id = body.get("previous_sprint_id", "")
                 if previous_project_id:
-                    store.save_project_runtime_state(previous_project_id, last_sprint_id=previous_sprint_id)
+                    store.save_project_runtime_state(
+                        previous_project_id,
+                        last_sprint_id=previous_sprint_id,
+                        context={
+                            "team_id": body.get("previous_team_id", ""),
+                            "subproject_id": body.get("previous_subproject_id", ""),
+                        },
+                    )
                 set_active_project_id(project_id)
                 runtime_state = store.get_project_runtime_state(project_id)
                 redirect_url = f"/?sprint={runtime_state.get('last_sprint_id')}" if runtime_state.get("last_sprint_id") else "/"
@@ -1256,9 +1423,18 @@ class Handler(BaseHTTPRequestHandler):
                 MemoryStore().save_project_runtime_state(
                     body.get("project_id", ""),
                     last_sprint_id=body.get("last_sprint_id", ""),
-                    context={"team_id": body.get("team_id", "")},
+                    context={
+                        "team_id": body.get("team_id", ""),
+                        "subproject_id": body.get("subproject_id", ""),
+                    },
                 )
                 self._json({"ok": True})
+            except Exception as e:
+                self._json({"ok": False, "error": str(e)}, 400)
+        elif p == "/api/platform-settings":
+            try:
+                settings = save_platform_settings(body)
+                self._json({"ok": True, "settings": settings})
             except Exception as e:
                 self._json({"ok": False, "error": str(e)}, 400)
         elif p.startswith("/api/projects/") and p.endswith("/config"):
@@ -1307,8 +1483,23 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 store = MemoryStore()
                 project_context = require_project_context(store, body.get("project_id"))
-                stack = resolve_stack_for_project(project_context, body.get("stack", "BACK"))
-                team = get_team_preset(body.get("team_id"))
+                subproject = get_subproject_definition(body.get("subproject_id", ""))
+                stack = resolve_stack_for_project(project_context, body.get("stack", subproject.get("stack_key", "BACK")))
+                team = None
+                if body.get("create_team"):
+                    create_result = create_team_preset({
+                        **body.get("create_team", {}),
+                        "stack_key": stack,
+                        "substacks": [body.get("substack", subproject.get("substack", ""))],
+                        "subproject_id": body.get("subproject_id", ""),
+                    })
+                    if not create_result.get("ok"):
+                        self._json({"ok": False, "error": create_result.get("error", "No se pudo crear el equipo.")}, 400)
+                        return
+                    body["team_id"] = create_result["team_id"]
+                    team = create_result["team"]
+                else:
+                    team = get_team_preset(body.get("team_id"))
                 if not team:
                     self._json({"ok": False, "error": "Debes asignar un equipo valido al sprint."}, 400)
                     return
@@ -1318,7 +1509,8 @@ class Handler(BaseHTTPRequestHandler):
                     "name": body.get("name", ""),
                     "project_id": project_context["project_id"],
                     "stack": stack,
-                    "substack": body.get("substack", ""),
+                    "substack": body.get("substack", subproject.get("substack", "")),
+                    "subproject_id": body.get("subproject_id", ""),
                     "team_id": body.get("team_id", ""),
                     "team_snapshot": team,
                     "tasks": body.get("tasks", [])
@@ -1329,7 +1521,7 @@ class Handler(BaseHTTPRequestHandler):
                         update_agent(agent["id"], {"removable": False, "team_id": team["id"]})
                 global _board_cache_ts
                 _board_cache_ts = 0
-                self._json({"ok": True, "sprint_id": plan["sprint_id"], "result": result})
+                self._json({"ok": True, "sprint_id": plan["sprint_id"], "team_id": body.get("team_id", ""), "result": result})
             except Exception as e:
                 self._json({"ok": False, "error": str(e)}, 400)
         else:                          self._json({"error":"not found"},404)

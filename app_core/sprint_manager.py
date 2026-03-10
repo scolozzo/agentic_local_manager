@@ -50,19 +50,24 @@ def create_sprint_from_plan(plan: dict[str, Any], memory_store: MemoryStore) -> 
     if not team_id:
         raise ValueError("Debes asociar un equipo al sprint.")
     substack = (plan.get("substack", "") or "").strip().lower()
+    subproject_id = (plan.get("subproject_id", "") or "").strip()
     team_snapshot = plan.get("team_snapshot", {})
     tasks_created = 0
     tasks_skipped = 0
 
     con = memory_store._connect()
     con.execute(
-        "INSERT OR REPLACE INTO sprints (sprint_id, name, stack, project_id, team_id, substack, team_snapshot, status) VALUES (?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status FROM sprints WHERE sprint_id = ?), 'active'))",
-        (sprint_id, name, stack, project_id, team_id, substack, json.dumps(team_snapshot), sprint_id),
+        "INSERT OR REPLACE INTO sprints (sprint_id, name, stack, project_id, subproject_id, team_id, substack, team_snapshot, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, COALESCE((SELECT status FROM sprints WHERE sprint_id = ?), 'active'))",
+        (sprint_id, name, stack, project_id, subproject_id, team_id, substack, json.dumps(team_snapshot), sprint_id),
     )
     con.commit()
     con.close()
 
-    memory_store.save_project_runtime_state(project_id, last_sprint_id=sprint_id, context={"team_id": team_id, "substack": substack})
+    memory_store.save_project_runtime_state(
+        project_id,
+        last_sprint_id=sprint_id,
+        context={"team_id": team_id, "substack": substack, "subproject_id": subproject_id},
+    )
 
     for task in plan.get("tasks", []):
         task_id = task.get("id", "")
