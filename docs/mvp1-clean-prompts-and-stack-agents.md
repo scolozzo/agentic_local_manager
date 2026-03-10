@@ -173,3 +173,14 @@ Cada agente debe soportar estos campos:
 - composicion de prompts centralizada
 - agentes configurables por stack listos para backend, front web y front movil
 - preset actual preservado
+
+## Estado actual
+
+Estado: `completado`
+
+Quedo incorporado en `develop` con:
+
+- `config/prompts/base`, `config/prompts/stacks` y `config/prompts/specializations`
+- composicion de prompts centralizada desde `app_core/agent_config.py`
+- `config/agents.json` versionado y desacoplado por `role`, `stack`, `specialization`, `provider`, `model`
+- dashboard mostrando metadata de agentes por stack y especializacion
