@@ -47,6 +47,7 @@ tmp_audio_*.ogg
 *.tmp
 .pytest_cache/
 tmp/
+capturas/
 
 # Node modules (if applicable)
 node_modules/
