@@ -570,6 +570,7 @@ select,input[type=text]{{width:100%;background:#0f172a;border:1px solid #334155;
       <button class="btn btn-green" onclick="addAgent()">Agregar</button>
     </div>
   </div>
+</div>
 <!-- UNIFIED CONFIG MODAL -->
 <div class="modal-bg" id="config-modal-bg">
   <div class="modal" style="width:600px;max-height:90vh;overflow-y:auto">
