@@ -11,33 +11,38 @@ from app_core.project_validation import validate_project_configuration
 _ACTIVE_PROJECT_FILE = REPO_ROOT / "config" / "active_project.json"
 
 
-def get_active_project_id(default: str = "") -> str:
-    if not _ACTIVE_PROJECT_FILE.exists():
-        return default
-    data = json.loads(_ACTIVE_PROJECT_FILE.read_text(encoding="utf-8"))
-    return data.get("project_id", default)
+def get_active_project_id(default: str = "", memory_store=None) -> str:
+    file_value = _read_active_project_file(default)
+    if file_value:
+        return file_value
+    if memory_store and hasattr(memory_store, "get_platform_runtime_state"):
+        state = memory_store.get_platform_runtime_state("dashboard").get("state", {})
+        return state.get("last_project_id", default)
+    return default
 
 
-def set_active_project_id(project_id: str) -> None:
+def set_active_project_id(project_id: str, memory_store=None) -> None:
     _ACTIVE_PROJECT_FILE.write_text(
         json.dumps({"project_id": project_id}, indent=2, ensure_ascii=False) + "\n",
         encoding="utf-8",
     )
+    if memory_store and hasattr(memory_store, "save_platform_runtime_state"):
+        memory_store.save_platform_runtime_state("dashboard", {"last_project_id": project_id})
 
 
 def get_active_project_context(memory_store) -> dict:
-    return resolve_project_context(memory_store, get_active_project_id())
+    return resolve_project_context(memory_store, get_active_project_id(memory_store=memory_store))
 
 
 def get_project_or_none(memory_store, project_id: str | None = None) -> dict | None:
-    resolved_project_id = project_id or get_active_project_id()
+    resolved_project_id = project_id or get_active_project_id(memory_store=memory_store)
     if not resolved_project_id:
         return None
     return memory_store.get_project(resolved_project_id)
 
 
 def require_project_context(memory_store, project_id: str | None = None) -> dict:
-    resolved_project_id = project_id or get_active_project_id()
+    resolved_project_id = project_id or get_active_project_id(memory_store=memory_store)
     if not resolved_project_id:
         raise ValueError("Debes crear o seleccionar un proyecto antes de crear/configurar sprints.")
     project = get_project_or_none(memory_store, resolved_project_id)
@@ -47,7 +52,7 @@ def require_project_context(memory_store, project_id: str | None = None) -> dict
 
 
 def resolve_project_context(memory_store, project_id: str | None = None) -> dict:
-    resolved_project_id = project_id or get_active_project_id()
+    resolved_project_id = project_id or get_active_project_id(memory_store=memory_store)
     project = get_project_or_none(memory_store, resolved_project_id)
     if not project:
         template_id = get_default_template_id()
@@ -82,3 +87,10 @@ def resolve_project_context(memory_store, project_id: str | None = None) -> dict
     }
     context["validation_errors"] = validate_project_configuration(context)
     return context
+
+
+def _read_active_project_file(default: str = "") -> str:
+    if not _ACTIVE_PROJECT_FILE.exists():
+        return default
+    data = json.loads(_ACTIVE_PROJECT_FILE.read_text(encoding="utf-8"))
+    return data.get("project_id", default)

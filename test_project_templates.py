@@ -1,3 +1,6 @@
+from pathlib import Path
+
+from app_core import project_context as project_context_module
 from app_core.project_context import resolve_project_context
 from app_core.project_templates import get_default_template_id, get_project_template, get_workflow_definition, list_project_templates
 from app_core.project_validation import default_stack_for_project, resolve_stack_for_project, validate_project_configuration, validate_stack_for_project
@@ -12,6 +15,9 @@ class FakeMemoryStore:
 
     def get_project(self, project_id):
         return next((project for project in self._projects if project.get("project_id") == project_id), None)
+
+    def get_platform_runtime_state(self, state_key="dashboard"):
+        return {"state_key": state_key, "state": {}}
 
 
 def test_default_template_is_software_delivery_default():
@@ -49,6 +55,32 @@ def test_project_context_uses_selected_template():
 def test_project_context_falls_back_to_default_template():
     context = resolve_project_context(FakeMemoryStore([]), "UNKNOWN")
     assert context["template_id"] == get_project_template(None)["id"]
+
+
+def test_project_context_uses_last_platform_project_when_active_file_missing(tmp_path):
+    original_file = project_context_module._ACTIVE_PROJECT_FILE
+    project_context_module._ACTIVE_PROJECT_FILE = Path(tmp_path) / "active_project.json"
+
+    class RuntimeStore(FakeMemoryStore):
+        def get_platform_runtime_state(self, state_key="dashboard"):
+            return {"state_key": state_key, "state": {"last_project_id": "RESTORED"}}
+
+    try:
+        store = RuntimeStore([
+            {
+                "project_id": "RESTORED",
+                "name": "Restored Project",
+                "description": "Recovered from runtime state",
+                "template_id": "software_backend",
+                "git_dirs": {"BACK": "C:/repos/restored-api"},
+                "directives": {},
+            }
+        ])
+        context = resolve_project_context(store)
+        assert context["project_id"] == "RESTORED"
+        assert context["name"] == "Restored Project"
+    finally:
+        project_context_module._ACTIVE_PROJECT_FILE = original_file
 
 
 def test_project_validation_detects_invalid_stack_configuration():

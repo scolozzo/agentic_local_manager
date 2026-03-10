@@ -66,6 +66,18 @@ def _generate_project_id(name: str) -> str:
     project_id = re.sub(r"[^A-Z0-9]+", "_", ascii_name.upper()).strip("_")
     return project_id[:32]
 
+
+def _save_dashboard_index_state(store: MemoryStore, project_id: str, sprint_id: str = "", team_id: str = "", subproject_id: str = "") -> None:
+    store.save_platform_runtime_state(
+        "dashboard",
+        {
+            "last_project_id": project_id,
+            "last_sprint_id": sprint_id,
+            "last_team_id": team_id,
+            "last_subproject_id": subproject_id,
+        },
+    )
+
 # ── Cargar .env ────────────────────────────────────────────────────────────────
 env_path = BASE_DIR / "VeloxIq" / ".env"
 if env_path.exists():
@@ -253,9 +265,9 @@ def get_local_board_data(sprint_id: str = "", project_id: str = "") -> dict:
 def build_data(sprint_id: str = "") -> dict:
     memory_store = MemoryStore()
     project_context = resolve_project_context(memory_store)
-    runtime_state = memory_store.get_project_runtime_state(project_context.get("project_id", "")) if project_context.get("project_id") else {"last_sprint_id": "", "context": {}}
-    effective_sprint_id = sprint_id or runtime_state.get("last_sprint_id", "")
     platform_state = memory_store.get_platform_runtime_state("dashboard")
+    runtime_state = memory_store.get_project_runtime_state(project_context.get("project_id", "")) if project_context.get("project_id") else {"last_sprint_id": "", "context": {}}
+    effective_sprint_id = sprint_id or runtime_state.get("last_sprint_id", "") or platform_state.get("state", {}).get("last_sprint_id", "")
     yt         = get_local_board_data(effective_sprint_id, project_context.get("project_id", ""))
     tc         = local_token_stats()
     endpoints  = local_certified_endpoints()
@@ -335,6 +347,7 @@ def render(data: dict) -> str:
     available_teams = data.get("available_teams", [])
     platform_settings = data.get("platform_settings", {})
     subprojects = data.get("subprojects", [])
+    platform_state = data.get("platform_state", {}).get("state", {})
 
     def pct(s): return int(s["verified"]/s["total"]*100) if s["total"] else 0
     def badges(by_state):
@@ -492,6 +505,27 @@ def render(data: dict) -> str:
         f'<option value="{subproject["id"]}" data-stack="{subproject.get("stack_key","")}" data-substack="{subproject.get("substack","")}">{subproject.get("label", subproject["id"])} · {subproject.get("repo_dir","")}</option>'
         for subproject in subprojects
     ) or '<option value="">No hay subproyectos configurados</option>'
+    restored_sprint_id = active.get("sprint_id") or runtime_state.get("last_sprint_id", "") or platform_state.get("last_sprint_id", "")
+    restored_team_id = active_team.get("id") or runtime_state.get("context", {}).get("team_id", "") or platform_state.get("last_team_id", "")
+    restored_subproject_id = active.get("subproject_id") or runtime_state.get("context", {}).get("subproject_id", "") or platform_state.get("last_subproject_id", "")
+    restored_subproject = next((item for item in subprojects if item.get("id") == restored_subproject_id), None)
+    restored_repo_suffix = f" ({restored_subproject.get('repo_dir', '')})" if restored_subproject else ""
+    logic_rows = [
+        ("Arranque del dashboard", "Se restaura automaticamente el ultimo proyecto, sprint, equipo y subproyecto persistidos para continuar donde quedo el trabajo."),
+        ("Persistencia de contexto", f"Proyecto: {project.get('project_id') or platform_state.get('last_project_id') or 'sin proyecto'} · Sprint: {restored_sprint_id or 'sin sprint'} · Equipo: {restored_team_id or 'sin equipo'} · Subproyecto: {restored_subproject.get('label') if restored_subproject else (restored_subproject_id or 'sin subproyecto')}"),
+        ("Vinculo sprint-equipo", "Cada sprint queda asociado a un equipo reusable. Ese equipo define los skills permitidos y el equipo activo se deriva del sprint seleccionado."),
+        ("Vinculo sprint-subproyecto", f"Cada sprint pertenece a un subproyecto del proyecto activo. El stack operativo y el repositorio se derivan del subproyecto seleccionado{restored_repo_suffix}."),
+        ("Reglas globales", "Las politicas de codificacion, git/ramas y optimizacion de tokens persisten a nivel plataforma y aplican a todos los agentes y proyectos."),
+    ]
+    logic_html = "".join(
+        f'<div style="padding:10px 0;border-top:1px solid #1e293b"><div style="font-size:11px;color:#94a3b8;font-weight:700">{title}</div><div style="font-size:11px;color:#cbd5e1;margin-top:4px">{text}</div></div>'
+        for title, text in logic_rows
+    )
+
+    def render_rule_list(items: list[str], empty_text: str) -> str:
+        if not items:
+            return f'<div style="font-size:11px;color:#64748b">{empty_text}</div>'
+        return "".join(f'<li>{textarea_escape(item)}</li>' for item in items)
 
     sys_run = data["sys_running"]
     raw_alerts = data.get("alerts", [])
@@ -635,6 +669,26 @@ select,input[type=text]{{width:100%;background:#0f172a;border:1px solid #334155;
   <div style="font-size:11px;color:#94a3b8">{project.get('template', {}).get('description', '')}</div>
   <div style="font-size:10px;color:#64748b;margin-top:6px">Workflow: {workflow_states}</div>
   {validation_html}
+</div>
+
+<div class="section" style="margin-bottom:12px">
+  <div class="section-title">Contexto restaurado y logica activa</div>
+  <div style="display:grid;grid-template-columns:1.2fr 1fr;gap:14px;align-items:start">
+    <div style="background:#0f172a;border:1px solid #334155;border-radius:10px;padding:12px">
+      <div style="font-size:12px;color:#e2e8f0;font-weight:700;margin-bottom:8px">Indice operativo</div>
+      <div style="font-size:11px;color:#94a3b8;margin-bottom:8px">El tablero vuelve a abrir con el ultimo contexto persistido y deja visible la logica base ya implementada.</div>
+      {logic_html}
+    </div>
+    <div style="background:#0f172a;border:1px solid #334155;border-radius:10px;padding:12px">
+      <div style="font-size:12px;color:#e2e8f0;font-weight:700;margin-bottom:8px">Reglas persistentes</div>
+      <div style="font-size:11px;color:#94a3b8;margin-bottom:6px">Codificacion</div>
+      <ul style="margin:0 0 10px 18px;font-size:11px;color:#cbd5e1">{render_rule_list(platform_settings.get("coding_rules", []), "Sin reglas configuradas.")}</ul>
+      <div style="font-size:11px;color:#94a3b8;margin-bottom:6px">Git y ramas</div>
+      <ul style="margin:0 0 10px 18px;font-size:11px;color:#cbd5e1">{render_rule_list(platform_settings.get("git_rules", []), "Sin reglas configuradas.")}</ul>
+      <div style="font-size:11px;color:#94a3b8;margin-bottom:6px">Optimizacion de tokens</div>
+      <ul style="margin:0 0 0 18px;font-size:11px;color:#cbd5e1">{render_rule_list(platform_settings.get("token_optimization_rules", []), "Sin reglas configuradas.")}</ul>
+    </div>
+  </div>
 </div>
 
 <!-- Quick scheduler controls under topbar -->
@@ -1390,7 +1444,8 @@ class Handler(BaseHTTPRequestHandler):
                     body.get("git_dirs", {}),
                     body.get("template_id", "software_delivery_default"),
                 )
-                set_active_project_id(project_id)
+                set_active_project_id(project_id, store)
+                _save_dashboard_index_state(store, project_id)
                 self._json({"ok": True, "project_id": project_id})
             except Exception as e:
                 self._json({"ok": False, "error": str(e)}, 400)
@@ -1412,21 +1467,37 @@ class Handler(BaseHTTPRequestHandler):
                             "subproject_id": body.get("previous_subproject_id", ""),
                         },
                     )
-                set_active_project_id(project_id)
+                set_active_project_id(project_id, store)
                 runtime_state = store.get_project_runtime_state(project_id)
+                _save_dashboard_index_state(
+                    store,
+                    project_id,
+                    runtime_state.get("last_sprint_id", ""),
+                    runtime_state.get("context", {}).get("team_id", ""),
+                    runtime_state.get("context", {}).get("subproject_id", ""),
+                )
                 redirect_url = f"/?sprint={runtime_state.get('last_sprint_id')}" if runtime_state.get("last_sprint_id") else "/"
                 self._json({"ok": True, "redirect_url": redirect_url})
             except Exception as e:
                 self._json({"ok": False, "error": str(e)}, 400)
         elif p == "/api/projects/runtime":
             try:
-                MemoryStore().save_project_runtime_state(
-                    body.get("project_id", ""),
+                store = MemoryStore()
+                project_id = body.get("project_id", "")
+                store.save_project_runtime_state(
+                    project_id,
                     last_sprint_id=body.get("last_sprint_id", ""),
                     context={
                         "team_id": body.get("team_id", ""),
                         "subproject_id": body.get("subproject_id", ""),
                     },
+                )
+                _save_dashboard_index_state(
+                    store,
+                    project_id,
+                    body.get("last_sprint_id", ""),
+                    body.get("team_id", ""),
+                    body.get("subproject_id", ""),
                 )
                 self._json({"ok": True})
             except Exception as e:
@@ -1519,6 +1590,14 @@ class Handler(BaseHTTPRequestHandler):
                 for agent in get_agents_with_eligibility(stack_key=stack, preset_name=team["id"]):
                     if agent.get("role") == "developer":
                         update_agent(agent["id"], {"removable": False, "team_id": team["id"]})
+                set_active_project_id(project_context["project_id"], store)
+                _save_dashboard_index_state(
+                    store,
+                    project_context["project_id"],
+                    plan["sprint_id"],
+                    team["id"],
+                    plan["subproject_id"],
+                )
                 global _board_cache_ts
                 _board_cache_ts = 0
                 self._json({"ok": True, "sprint_id": plan["sprint_id"], "team_id": body.get("team_id", ""), "result": result})
