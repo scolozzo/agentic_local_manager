@@ -1,4 +1,7 @@
+import os
+
 from tools.install_support import available_profiles, ensure_manual_login_fallback
+from tools.install_support import write_json
 
 
 def test_available_profiles_can_exclude_manual_login():
@@ -38,3 +41,14 @@ def test_manual_login_fallback_populates_role_defaults():
         "orchestrator": profile_id,
         "pm": profile_id,
     }
+
+
+def test_write_json_overwrites_existing_readonly_file(tmp_path):
+    target = tmp_path / "config" / "system_settings.json"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text('{"old": true}\n', encoding="utf-8")
+    os.chmod(target, 0o444)
+
+    write_json(target, {"ok": True})
+
+    assert '"ok": true' in target.read_text(encoding="utf-8").lower()
