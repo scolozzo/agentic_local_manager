@@ -24,10 +24,35 @@ from app_core.agent_manager import (
 from app_core.alert_manager import get_active_alerts, clear_alert
 from app_core.memory_store import MemoryStore
 from app_core.project_context import resolve_project_context, set_active_project_id
-from app_core.project_templates import list_project_templates
+from app_core.project_templates import get_workflow_definition, get_project_template, list_project_templates
+from app_core.project_validation import validate_project_configuration, resolve_stack_for_project
 
 BASE_DIR = Path(__file__).parent
 PORT     = 8888
+
+
+def _preview_project_context(
+    *,
+    project_id: str,
+    name: str,
+    description: str,
+    template_id: str,
+    git_dirs: dict,
+    directives: dict,
+) -> dict:
+    template = get_project_template(template_id)
+    context = {
+        "project_id": project_id,
+        "name": name,
+        "description": description,
+        "template_id": template_id,
+        "template": template,
+        "workflow": get_workflow_definition(template_id),
+        "git_dirs": git_dirs,
+        "directives": directives,
+    }
+    context["validation_errors"] = validate_project_configuration(context)
+    return context
 
 # ── Cargar .env ────────────────────────────────────────────────────────────────
 env_path = BASE_DIR / "VeloxIq" / ".env"
@@ -383,6 +408,9 @@ def render(data: dict) -> str:
         for template in templates
     )
     workflow_states = " → ".join(project.get("workflow", {}).get("states", []))
+    validation_html = "".join(
+        f'<div style="font-size:11px;color:#fca5a5">{error}</div>' for error in project.get("validation_errors", [])
+    )
 
     sys_run = data["sys_running"]
     raw_alerts = data.get("alerts", [])
@@ -521,6 +549,7 @@ select,input[type=text]{{width:100%;background:#0f172a;border:1px solid #334155;
   </div>
   <div style="font-size:11px;color:#94a3b8">{project.get('template', {}).get('description', '')}</div>
   <div style="font-size:10px;color:#64748b;margin-top:6px">Workflow: {workflow_states}</div>
+  {validation_html}
 </div>
 
 <!-- Quick scheduler controls under topbar -->
@@ -1029,7 +1058,19 @@ class Handler(BaseHTTPRequestHandler):
             self._json(MemoryStore().project_list())
         elif p == "/api/projects/create":
             try:
-                MemoryStore().project_create(
+                preview = _preview_project_context(
+                    project_id=body.get("project_id", ""),
+                    name=body.get("name", ""),
+                    description=body.get("description", ""),
+                    template_id=body.get("template_id", "software_delivery_default"),
+                    git_dirs=body.get("git_dirs", {}),
+                    directives={},
+                )
+                if preview["validation_errors"]:
+                    self._json({"ok": False, "error": "; ".join(preview["validation_errors"])}, 400)
+                    return
+                store = MemoryStore()
+                store.project_create(
                     body.get("project_id", ""),
                     body.get("name", ""),
                     body.get("description", ""),
@@ -1049,16 +1090,42 @@ class Handler(BaseHTTPRequestHandler):
         elif p.startswith("/api/projects/") and p.endswith("/config"):
             project_id = p.split("/")[3]
             try:
-                MemoryStore().project_update_git_dirs(project_id, body.get("git_dirs", {}))
+                store = MemoryStore()
+                current = resolve_project_context(store, project_id)
+                preview = _preview_project_context(
+                    project_id=project_id,
+                    name=current.get("name", project_id),
+                    description=current.get("description", ""),
+                    template_id=current.get("template_id", "software_delivery_default"),
+                    git_dirs=body.get("git_dirs", {}),
+                    directives={**current.get("directives", {}), **body.get("directives", {})},
+                )
+                if preview["validation_errors"]:
+                    self._json({"ok": False, "error": "; ".join(preview["validation_errors"])}, 400)
+                    return
+                store.project_update_git_dirs(project_id, body.get("git_dirs", {}))
                 for key, value in body.get("directives", {}).items():
-                    MemoryStore().project_set_directive(project_id, key, value)
+                    store.project_set_directive(project_id, key, value)
                 self._json({"ok": True})
             except Exception as e:
                 self._json({"ok": False, "error": str(e)}, 400)
         elif p.startswith("/api/projects/") and p.endswith("/template"):
             project_id = p.split("/")[3]
             try:
-                MemoryStore().project_set_template(project_id, body.get("template_id", "software_delivery_default"))
+                store = MemoryStore()
+                current = resolve_project_context(store, project_id)
+                preview = _preview_project_context(
+                    project_id=project_id,
+                    name=current.get("name", project_id),
+                    description=current.get("description", ""),
+                    template_id=body.get("template_id", "software_delivery_default"),
+                    git_dirs=current.get("git_dirs", {}),
+                    directives=current.get("directives", {}),
+                )
+                if preview["validation_errors"]:
+                    self._json({"ok": False, "error": "; ".join(preview["validation_errors"])}, 400)
+                    return
+                store.project_set_template(project_id, body.get("template_id", "software_delivery_default"))
                 self._json({"ok": True})
             except Exception as e:
                 self._json({"ok": False, "error": str(e)}, 400)
@@ -1066,14 +1133,18 @@ class Handler(BaseHTTPRequestHandler):
             from app_core.memory_store import MemoryStore
             from app_core.sprint_manager import create_sprint_from_plan
             try:
+                store = MemoryStore()
+                project_context = resolve_project_context(store, body.get("project_id"))
+                stack = resolve_stack_for_project(project_context, body.get("stack", "BACK"))
                 # Expect: {sprint_id, name, stack, tasks: [{id, summary, depends_on, parallel}]}
                 plan = {
                     "sprint_id": body.get("sprint_id", ""),
                     "name": body.get("name", ""),
-                    "stack": body.get("stack", "BACK"),
+                    "project_id": project_context["project_id"],
+                    "stack": stack,
                     "tasks": body.get("tasks", [])
                 }
-                result = create_sprint_from_plan(plan, MemoryStore())
+                result = create_sprint_from_plan(plan, store)
                 global _board_cache_ts
                 _board_cache_ts = 0
                 self._json({"ok": True, "sprint_id": plan["sprint_id"], "result": result})

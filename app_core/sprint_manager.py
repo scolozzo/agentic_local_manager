@@ -41,13 +41,14 @@ def create_sprint_from_plan(plan: dict[str, Any], memory_store: MemoryStore) -> 
     sprint_id = plan.get("sprint_id", "")
     name = plan.get("name", sprint_id)
     stack = plan.get("stack", "BACK")
+    project_id = plan.get("project_id", "SEGURO")
     tasks_created = 0
     tasks_skipped = 0
 
     con = memory_store._connect()
     con.execute(
-        "INSERT OR REPLACE INTO sprints (sprint_id, name, stack, status) VALUES (?, ?, ?, COALESCE((SELECT status FROM sprints WHERE sprint_id = ?), 'active'))",
-        (sprint_id, name, stack, sprint_id),
+        "INSERT OR REPLACE INTO sprints (sprint_id, name, stack, project_id, status) VALUES (?, ?, ?, ?, COALESCE((SELECT status FROM sprints WHERE sprint_id = ?), 'active'))",
+        (sprint_id, name, stack, project_id, sprint_id),
     )
     con.commit()
     con.close()

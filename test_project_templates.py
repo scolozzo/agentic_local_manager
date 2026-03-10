@@ -1,5 +1,6 @@
 from app_core.project_context import resolve_project_context
 from app_core.project_templates import get_default_template_id, get_project_template, get_workflow_definition, list_project_templates
+from app_core.project_validation import default_stack_for_project, resolve_stack_for_project, validate_project_configuration, validate_stack_for_project
 
 
 class FakeMemoryStore:
@@ -45,3 +46,24 @@ def test_project_context_uses_selected_template():
 def test_project_context_falls_back_to_default_template():
     context = resolve_project_context(FakeMemoryStore([]), "UNKNOWN")
     assert context["template_id"] == get_project_template(None)["id"]
+
+
+def test_project_validation_detects_invalid_stack_configuration():
+    context = {
+        "template": {"allowed_stacks": ["BO"], "required_roles": ["pm", "developer"]},
+        "git_dirs": {"BACK": "C:/repos/backend"},
+    }
+    errors = validate_project_configuration(context)
+    assert any("template disallows stacks: BACK" in error for error in errors)
+
+
+def test_project_stack_resolution_uses_template_default():
+    context = {
+        "template": {"allowed_stacks": ["MOB"], "required_roles": ["pm"]},
+        "git_dirs": {},
+    }
+    ok, candidate = validate_stack_for_project(context, "BACK")
+    assert ok is False
+    assert candidate == "BACK"
+    assert default_stack_for_project(context) == "MOB"
+    assert resolve_stack_for_project(context, "BACK") == "MOB"

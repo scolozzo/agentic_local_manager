@@ -243,6 +243,12 @@ class MemoryStore:
         con.close()
         return dict(row) if row else None
 
+    def sprint_set_project(self, sprint_id: str, project_id: str) -> None:
+        con = self._connect()
+        con.execute("UPDATE sprints SET project_id = ? WHERE sprint_id = ?", (project_id, sprint_id))
+        con.commit()
+        con.close()
+
     def sprint_pause(self, sprint_id: str) -> str:
         con = self._connect()
         con.execute("UPDATE sprints SET status = 'paused' WHERE sprint_id = ?", (sprint_id,))

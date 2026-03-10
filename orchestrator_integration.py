@@ -13,6 +13,8 @@ from app_core.memory_store import MemoryStore
 from app_core.config_loader import get_gitlab_project_id, get_develop_branch
 from app_core.agent_config import load_repo_env
 from app_core.assignment_policy import LocalBoardDefaultAssignmentPolicy
+from app_core.project_context import get_active_project_context
+from app_core.project_validation import resolve_stack_for_project
 
 # Load environment
 from dotenv import load_dotenv
@@ -49,15 +51,20 @@ def notify_pm_event(task_id, event_type, details):
     )
 
 
+def _get_project_context() -> dict:
+    return get_active_project_context(_memory_store)
+
+
 def _get_project_id_for_task(task: dict) -> str:
     """Resolve GitLab project_id from task's stack (falls back to env var)."""
-    stack = (task.get("stack") or "BACK").upper()
+    stack = resolve_stack_for_project(_get_project_context(), task.get("stack"))
     return get_gitlab_project_id(stack)
 
 
 def _get_develop_branch_for_task(task: dict) -> str:
-    stack = (task.get("stack") or "BACK").upper()
-    return get_develop_branch(stack)
+    project_context = _get_project_context()
+    stack = resolve_stack_for_project(project_context, task.get("stack"))
+    return project_context.get("directives", {}).get("dev-branch") or get_develop_branch(stack)
 
 
 def _get_branch_for_task(task_id: str) -> str:
@@ -84,7 +91,7 @@ def _get_parent_feature_branch(task_id: str) -> str:
     if len(parts) >= 3:
         parent_id = f"{parts[1]}-{parts[2]}"
         return _get_branch_for_task(parent_id)
-    return "develop"
+    return _get_project_context().get("directives", {}).get("dev-branch") or "develop"
 
 
 def assign_pending_tasks():

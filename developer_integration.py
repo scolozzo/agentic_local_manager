@@ -23,6 +23,8 @@ from app_core.state_manager import StateManager
 from app_core.memory_store import MemoryStore
 from app_core.config_loader import get_gitlab_project_id, get_develop_branch
 from app_core.agent_config import compose_agent_prompt, get_agent, get_agent_model, load_repo_env
+from app_core.project_context import get_active_project_context
+from app_core.project_validation import validate_stack_for_project, resolve_stack_for_project
 
 # Load environment
 load_repo_env()
@@ -47,6 +49,10 @@ _token_logger = TokenLogger()
 # Memory Store + State Manager (local board backend)
 _memory_store = MemoryStore()
 _state_manager = StateManager(memory_store=_memory_store)
+
+
+def _get_project_context() -> dict:
+    return get_active_project_context(_memory_store)
 
 def _get_dev_system_prompt(agent_id: str) -> str:
     return compose_agent_prompt(agent_id)
@@ -228,9 +234,25 @@ def dev_loop(agent_id):
                     has_finished = any("Trabajo finalizado" in c["text"] for c in my_comments)
 
                 # Stack-aware GitLab project ID
-                task_stack = task.get("stack", "BACK") or "BACK"
+                project_context = _get_project_context()
+                is_valid_stack, requested_stack = validate_stack_for_project(project_context, task.get("stack"))
+                task_stack = resolve_stack_for_project(project_context, task.get("stack"))
+                if not is_valid_stack:
+                    _memory_store.board_add_comment(
+                        task_id,
+                        login,
+                        f"[BLOCKED] Stack {requested_stack} no permitido por template {project_context['template_id']}",
+                    )
+                    _state_manager.transition(
+                        task_id=task_id,
+                        target_state="Blocked",
+                        agent_id=agent_id,
+                        reason=f"Template {project_context['template_id']} disallows stack {requested_stack}",
+                        max_retries=1,
+                    )
+                    continue
                 project_id = get_gitlab_project_id(task_stack)
-                develop_branch = get_develop_branch(task_stack)
+                develop_branch = project_context.get("directives", {}).get("dev-branch") or get_develop_branch(task_stack)
 
                 # Branch naming: fix tasks use fix/ prefix from parent feature branch
                 is_fix = _is_fix_task(task_id)

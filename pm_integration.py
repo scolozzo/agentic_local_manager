@@ -12,6 +12,8 @@ from app_core.status_router import handle_pm_query, LocalBoardStatusClient
 from app_core.memory_store import MemoryStore
 from app_core.sprint_manager import parse_plan, create_sprint_from_plan, describe_execution_plan
 from app_core.agent_config import compose_agent_prompt, get_agent_model, load_repo_env
+from app_core.project_context import get_active_project_context
+from app_core.project_validation import resolve_stack_for_project
 
 # Load environment
 load_repo_env()
@@ -73,6 +75,9 @@ def import_plan_from_text(text: str, chat_id: str):
     if not plan:
         send_telegram_direct(chat_id, "No pude parsear el plan. Usa formato JSON o Markdown.")
         return
+    project_context = get_active_project_context(_memory_store)
+    plan["project_id"] = project_context["project_id"]
+    plan["stack"] = resolve_stack_for_project(project_context, plan.get("stack"))
     result = create_sprint_from_plan(plan, _memory_store)
     summary = describe_execution_plan(plan)
     reply = (
@@ -291,10 +296,12 @@ def handle_sprint_command(text: str, chat_id: str) -> bool:
     try:
         import requests
         url = "http://localhost:8888/api/sprints/create"
+        project_context = get_active_project_context(_memory_store)
         payload = {
             "sprint_id": sprint_id,
             "name": name,
-            "stack": "BACK",  # Default to BACK, can be enhanced later
+            "project_id": project_context["project_id"],
+            "stack": resolve_stack_for_project(project_context, None),
             "tasks": tasks
         }
         r = requests.post(url, json=payload, timeout=10)
