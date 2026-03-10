@@ -3,20 +3,19 @@ import sys
 import requests
 import json
 import time
-from dotenv import load_dotenv
 from datetime import datetime
 
 # Ensure veloxiq package is importable
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from VeloxIq.token_logger import TokenLogger, LLMCall
-from VeloxIq.reasoning_control import get_llm_params, classify_qa_task
-from VeloxIq.memory_store import MemoryStore
-from VeloxIq.state_manager import StateManager
+from app_core.token_logger import TokenLogger, LLMCall
+from app_core.reasoning_control import get_llm_params, classify_qa_task
+from app_core.memory_store import MemoryStore
+from app_core.state_manager import StateManager
+from app_core.agent_config import compose_agent_prompt, get_agent_model, load_repo_env
 
 # Load environment
-env_path = r"C:\Users\Lenovo\.gemini\antigravity\scratch\VeloxIq\.env"
-load_dotenv(env_path)
+load_repo_env()
 
 # Z.AI config
 ZAI_API_KEY = os.getenv("ZAI_API_KEY")
@@ -26,7 +25,7 @@ ZAI_API_BASE = os.getenv("ZAI_API_BASE", "https://api.z.ai/api/paas/v4")
 MINIMAX_API_KEY = os.getenv("MINIMAX_API_KEY")
 MINIMAX_API_BASE = os.getenv("MINIMAX_API_BASE", "https://api.minimax.chat/v1")
 
-QA_MODEL = os.getenv("ZAI_MODEL_QA", "minimax-m2.5-standard")
+QA_MODEL = get_agent_model("qa", env_var="ZAI_MODEL_QA", default="minimax-m2.5-standard")
 
 if QA_MODEL.startswith("minimax"):
     _QA_API_BASE = MINIMAX_API_BASE
@@ -44,23 +43,8 @@ _token_logger = TokenLogger()
 _memory_store = MemoryStore()
 _state_manager = StateManager(memory_store=_memory_store)
 
-# System prompt cache
-_cached_qa_prompt: str | None = None
-
-
 def _get_qa_system_prompt() -> str:
-    global _cached_qa_prompt
-    if _cached_qa_prompt is not None:
-        return _cached_qa_prompt
-    try:
-        with open(
-            r"C:\Users\Lenovo\.gemini\antigravity\scratch\config\prompts\qa_back.md",
-            "r", encoding="utf-8"
-        ) as f:
-            _cached_qa_prompt = f.read()
-    except Exception:
-        _cached_qa_prompt = "Expert QA Engineer. Reply concisely with APPROVED or REJECTED."
-    return _cached_qa_prompt
+    return compose_agent_prompt("qa")
 
 
 def parse_qa_review_for_issues(qa_review: str) -> list[dict]:

@@ -1,0 +1,115 @@
+{
+  "default_preset": "default_software_team",
+  "presets": {
+    "default_software_team": {
+      "label": "Default Software Team",
+      "agents": [
+        "pm",
+        "orchestrator",
+        "dev1",
+        "dev2",
+        "dev3",
+        "qa"
+      ]
+    },
+    "backend_team": {
+      "label": "Backend Team",
+      "template_agents": [
+        {
+          "type": "pm",
+          "role": "pm",
+          "stack": "backend",
+          "stack_key": "BACK",
+          "specialization": "project_manager"
+        },
+        {
+          "type": "orchestrator",
+          "role": "orchestrator",
+          "stack": "backend",
+          "stack_key": "BACK",
+          "specialization": "orchestrator"
+        },
+        {
+          "type": "dev",
+          "role": "developer",
+          "stack": "backend",
+          "stack_key": "BACK",
+          "specialization": "backend"
+        },
+        {
+          "type": "qa",
+          "role": "qa",
+          "stack": "backend",
+          "stack_key": "BACK",
+          "specialization": "qa_backend"
+        }
+      ]
+    },
+    "front_web_team": {
+      "label": "Frontend Web Team",
+      "template_agents": [
+        {
+          "type": "pm",
+          "role": "pm",
+          "stack": "front_web",
+          "stack_key": "BO",
+          "specialization": "project_manager"
+        },
+        {
+          "type": "orchestrator",
+          "role": "orchestrator",
+          "stack": "front_web",
+          "stack_key": "BO",
+          "specialization": "orchestrator"
+        },
+        {
+          "type": "dev",
+          "role": "developer",
+          "stack": "front_web",
+          "stack_key": "BO",
+          "specialization": "front_web"
+        },
+        {
+          "type": "qa",
+          "role": "qa",
+          "stack": "front_web",
+          "stack_key": "BO",
+          "specialization": "qa_bo"
+        }
+      ]
+    },
+    "front_mobile_team": {
+      "label": "Frontend Mobile Team",
+      "template_agents": [
+        {
+          "type": "pm",
+          "role": "pm",
+          "stack": "front_mobile",
+          "stack_key": "MOB",
+          "specialization": "project_manager"
+        },
+        {
+          "type": "orchestrator",
+          "role": "orchestrator",
+          "stack": "front_mobile",
+          "stack_key": "MOB",
+          "specialization": "orchestrator"
+        },
+        {
+          "type": "dev",
+          "role": "developer",
+          "stack": "front_mobile",
+          "stack_key": "MOB",
+          "specialization": "mob_android"
+        },
+        {
+          "type": "qa",
+          "role": "qa",
+          "stack": "front_mobile",
+          "stack_key": "MOB",
+          "specialization": "qa_mob"
+        }
+      ]
+    }
+  }
+}
