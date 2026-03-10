@@ -515,7 +515,7 @@ def render(data: dict) -> str:
     git_rules_value = textarea_escape("\n".join(platform_settings.get("git_rules", [])))
     token_rules_value = textarea_escape("\n".join(platform_settings.get("token_optimization_rules", [])))
     subproject_options = "".join(
-        f'<option value="{subproject["id"]}" data-stack="{subproject.get("stack_key","")}" data-substack="{subproject.get("substack","")}">{subproject.get("label", subproject["id"])} · {subproject.get("repo_dir","")}</option>'
+        f'<option value="{subproject["id"]}" data-stack="{subproject.get("stack_key","")}" data-substack="{subproject.get("substack","")}">{subproject.get("label", subproject["id"])} · {subproject.get("repo_url","")}</option>'
         for subproject in subprojects
     ) or '<option value="">No hay subproyectos configurados</option>'
     model_profile_options = "".join(
@@ -526,7 +526,8 @@ def render(data: dict) -> str:
         f'<div class="card" style="padding:12px">'
         f'<div style="font-size:13px;font-weight:700;color:#e2e8f0">{textarea_escape(subproject.get("label", subproject["id"]))}</div>'
         f'<div style="font-size:11px;color:#94a3b8;margin-top:4px">{subproject.get("stack_key","")} / {subproject.get("substack","")}</div>'
-        f'<div style="font-size:11px;color:#64748b;margin-top:4px">{textarea_escape(subproject.get("repo_dir",""))}</div>'
+        f'<div style="font-size:11px;color:#64748b;margin-top:4px">{textarea_escape(subproject.get("repo_url",""))}</div>'
+        f'<div style="font-size:11px;color:#475569;margin-top:4px">Workspace: {textarea_escape(subproject.get("workspace_dir",""))}</div>'
         f'</div>'
         for subproject in subprojects
     )
@@ -534,7 +535,7 @@ def render(data: dict) -> str:
     restored_team_id = active_team.get("id") or runtime_state.get("context", {}).get("team_id", "") or platform_state.get("last_team_id", "")
     restored_subproject_id = active.get("subproject_id") or runtime_state.get("context", {}).get("subproject_id", "") or platform_state.get("last_subproject_id", "")
     restored_subproject = next((item for item in subprojects if item.get("id") == restored_subproject_id), None)
-    restored_repo_suffix = f" ({restored_subproject.get('repo_dir', '')})" if restored_subproject else ""
+    restored_repo_suffix = f" ({restored_subproject.get('repo_url', '')})" if restored_subproject else ""
     logic_rows = [
         ("Arranque del dashboard", "Se restaura automaticamente el ultimo proyecto, sprint, equipo y subproyecto persistidos para continuar donde quedo el trabajo."),
         ("Persistencia de contexto", f"Proyecto: {project.get('project_id') or platform_state.get('last_project_id') or 'sin proyecto'} · Sprint: {restored_sprint_id or 'sin sprint'} · Equipo: {restored_team_id or 'sin equipo'} · Subproyecto: {restored_subproject.get('label') if restored_subproject else (restored_subproject_id or 'sin subproyecto')}"),
@@ -576,7 +577,7 @@ def render(data: dict) -> str:
   <div class="section-title">Crear primer subproyecto</div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start">
     <div>
-      <div style="font-size:12px;color:#94a3b8;margin-bottom:12px">Cada proyecto necesita al menos un subproyecto con stack, substack, repositorio y perfiles LLM por defecto para developers y QA.</div>
+      <div style="font-size:12px;color:#94a3b8;margin-bottom:12px">Cada proyecto necesita al menos un subproyecto con stack, substack, URL del repositorio y perfiles LLM por defecto para developers y QA. El sistema crea workspaces locales aislados por proyecto y subproyecto.</div>
       <div class="fg">
         <label>Nombre del subproyecto</label>
         <input type="text" id="subproject-name" placeholder="Ej: API Core">
@@ -590,16 +591,16 @@ def render(data: dict) -> str:
         </select>
       </div>
       <div class="fg">
-        <label>Substack existente</label>
+        <label>Substack</label>
         <select id="subproject-substack" onchange="refreshSubprojectForm()"></select>
       </div>
       <div class="fg">
-        <label>O crear nuevo substack</label>
-        <input type="text" id="subproject-substack-custom" placeholder="Opcional">
+        <label>Nuevo substack</label>
+        <input type="text" id="subproject-substack-custom" placeholder="Se habilita al elegir Crear nuevo...">
       </div>
       <div class="fg">
-        <label>Repositorio</label>
-        <input type="text" id="subproject-repo" placeholder="C:\\Users\\...\\repos\\mi-subproyecto">
+        <label>URL del repositorio</label>
+        <input type="text" id="subproject-repo" placeholder="https://gitlab.com/org/mi-subproyecto.git">
       </div>
       <div class="fg">
         <label>Skills del substack</label>
@@ -615,13 +616,8 @@ def render(data: dict) -> str:
       </div>
       <button class="btn btn-green" onclick="createSubproject()" style="width:100%">Crear subproyecto</button>
     </div>
-    <div>
-      <div style="font-size:12px;color:#e2e8f0;font-weight:700;margin-bottom:8px">Configuracion global actual</div>
-      <div style="font-size:11px;color:#94a3b8;margin-bottom:8px">PM y Orchestrator usan el perfil global definido en la instalacion. Developers y QA se fijan por subproyecto.</div>
-      <div style="font-size:11px;color:#cbd5e1;line-height:1.6">
-        <div>PM: {textarea_escape(system_settings.get("role_defaults", {}).get("pm", "") or "sin perfil")}</div>
-        <div>Orchestrator: {textarea_escape(system_settings.get("role_defaults", {}).get("orchestrator", "") or "sin perfil")}</div>
-      </div>
+    <div style="display:flex;align-items:flex-start">
+      <a class="btn btn-outline btn-sm" href="/settings">Ver configuracion global</a>
     </div>
   </div>
 </div>"""
@@ -739,7 +735,7 @@ select,input[type=text]{{width:100%;background:#0f172a;border:1px solid #334155;
   </button>
   <button class="btn btn-blue" onclick="document.getElementById('mbg').classList.add('open')">+ Agente</button>
   <button class="btn btn-blue" onclick="openSprintModal()" style="background:#d946ef">+ Sprint</button>''' if project_exists and has_subprojects else ''}
-  <button class="btn btn-blue" onclick="openConfigModal()" style="background:#8b5cf6">Configuracion</button>
+  <a class="btn btn-blue" href="/settings" style="background:#8b5cf6;text-decoration:none">Configuracion</a>
 </div>
 
 {onboarding_html}
@@ -771,31 +767,6 @@ select,input[type=text]{{width:100%;background:#0f172a;border:1px solid #334155;
   <div style="font-size:11px;color:#94a3b8">{project.get('template', {}).get('description', '')}</div>
   <div style="font-size:10px;color:#64748b;margin-top:6px">Workflow: {workflow_states}</div>
   {validation_html}
-</div>
-
-<div class="section" style="margin-bottom:12px">
-  <div class="section-title">Subproyectos</div>
-  <div class="grid3">{subproject_cards or '<div style="font-size:12px;color:#94a3b8">Todavia no hay subproyectos configurados.</div>'}</div>
-</div>
-
-<div class="section" style="margin-bottom:12px">
-  <div class="section-title">Contexto restaurado y logica activa</div>
-  <div style="display:grid;grid-template-columns:1.2fr 1fr;gap:14px;align-items:start">
-    <div style="background:#0f172a;border:1px solid #334155;border-radius:10px;padding:12px">
-      <div style="font-size:12px;color:#e2e8f0;font-weight:700;margin-bottom:8px">Indice operativo</div>
-      <div style="font-size:11px;color:#94a3b8;margin-bottom:8px">El tablero vuelve a abrir con el ultimo contexto persistido y deja visible la logica base ya implementada.</div>
-      {logic_html}
-    </div>
-    <div style="background:#0f172a;border:1px solid #334155;border-radius:10px;padding:12px">
-      <div style="font-size:12px;color:#e2e8f0;font-weight:700;margin-bottom:8px">Reglas persistentes</div>
-      <div style="font-size:11px;color:#94a3b8;margin-bottom:6px">Codificacion</div>
-      <ul style="margin:0 0 10px 18px;font-size:11px;color:#cbd5e1">{render_rule_list(platform_settings.get("coding_rules", []), "Sin reglas configuradas.")}</ul>
-      <div style="font-size:11px;color:#94a3b8;margin-bottom:6px">Git y ramas</div>
-      <ul style="margin:0 0 10px 18px;font-size:11px;color:#cbd5e1">{render_rule_list(platform_settings.get("git_rules", []), "Sin reglas configuradas.")}</ul>
-      <div style="font-size:11px;color:#94a3b8;margin-bottom:6px">Optimizacion de tokens</div>
-      <ul style="margin:0 0 0 18px;font-size:11px;color:#cbd5e1">{render_rule_list(platform_settings.get("token_optimization_rules", []), "Sin reglas configuradas.")}</ul>
-    </div>
-  </div>
 </div>
 '''}
 
@@ -912,16 +883,16 @@ select,input[type=text]{{width:100%;background:#0f172a;border:1px solid #334155;
           </select>
         </div>
         <div class="fg">
-          <label>Substack existente</label>
+          <label>Substack</label>
           <select id="subproject-substack-config" onchange="refreshSubprojectForm('config')"></select>
         </div>
         <div class="fg">
-          <label>O crear nuevo substack</label>
-          <input type="text" id="subproject-substack-custom-config" placeholder="Opcional">
+          <label>Nuevo substack</label>
+          <input type="text" id="subproject-substack-custom-config" placeholder="Se habilita al elegir Crear nuevo...">
         </div>
         <div class="fg">
-          <label>Repositorio</label>
-          <input type="text" id="subproject-repo-config" placeholder="C:\\Users\\...\\repos\\subproyecto">
+          <label>URL del repositorio</label>
+          <input type="text" id="subproject-repo-config" placeholder="https://gitlab.com/org/subproyecto.git">
         </div>
         <div class="fg">
           <label>Skills del substack</label>
@@ -1141,15 +1112,20 @@ function refreshSubprojectForm(scope='main'){{
   const suffix=scope==='config' ? '-config' : '';
   const stack=document.getElementById('subproject-stack'+suffix)?.value||'BACK';
   const substackSelect=document.getElementById('subproject-substack'+suffix);
+  const customSubstackInput=document.getElementById('subproject-substack-custom'+suffix);
   const skillsSelect=document.getElementById('subproject-skills'+suffix);
   if(substackSelect){{
     const options=SUBSTACK_OPTIONS[stack]||[];
     const current=substackSelect.value;
-    substackSelect.innerHTML=options.map(value=>`<option value="${{value}}">${{value}}</option>`).join('');
-    if(current && options.includes(current))substackSelect.value=current;
+    substackSelect.innerHTML=options.map(value=>`<option value="${{value}}">${{value}}</option>`).join('') + '<option value="__custom__">Crear nuevo...</option>';
+    if(current && (options.includes(current) || current==='__custom__'))substackSelect.value=current;
+  }}
+  if(customSubstackInput){{
+    customSubstackInput.disabled=(substackSelect?.value||'')!=='__custom__';
+    if(customSubstackInput.disabled)customSubstackInput.value='';
   }}
   if(skillsSelect){{
-    const selectedSubstack=substackSelect?.value||'';
+    const selectedSubstack=(substackSelect?.value||'')==='__custom__' ? '' : (substackSelect?.value||'');
     const recommended=TEAM_PRESETS.find(team=>((team.stack_key||'')===stack) && (!(team.substacks||[]).length || (team.substacks||[]).includes(selectedSubstack)));
     const allowed=Object.entries(SPECS).filter(([key, spec])=>spec.role!=='pm' && spec.role!=='orchestrator' && (spec.stack_key||'')===stack);
     skillsSelect.innerHTML=allowed.map(([key, spec])=>`<option value="${{key}}">${{spec.label}}</option>`).join('');
@@ -1402,14 +1378,14 @@ async function createSubproject(scope='main'){{
   const stack_key=(document.getElementById('subproject-stack'+suffix)?.value||'').trim();
   const baseSubstack=(document.getElementById('subproject-substack'+suffix)?.value||'').trim();
   const customSubstack=(document.getElementById('subproject-substack-custom'+suffix)?.value||'').trim();
-  const substack=(customSubstack||baseSubstack).trim();
-  const repo_dir=(document.getElementById('subproject-repo'+suffix)?.value||'').trim();
+  const substack=((baseSubstack==='__custom__' ? '' : baseSubstack) || customSubstack).trim();
+  const repo_url=(document.getElementById('subproject-repo'+suffix)?.value||'').trim();
   const skills=Array.from(document.getElementById('subproject-skills'+suffix)?.selectedOptions||[]).map(option=>option.value);
   const dev_model_profile=(document.getElementById('subproject-dev-model'+suffix)?.value||SYSTEM_ROLE_DEFAULTS.developers||'').trim();
   const qa_model_profile=(document.getElementById('subproject-qa-model'+suffix)?.value||SYSTEM_ROLE_DEFAULTS.qa||'').trim();
-  if(!label||!stack_key||!substack||!repo_dir){{alert('Nombre, stack, substack y repositorio son obligatorios');return;}}
+  if(!label||!stack_key||!substack||!repo_url){{alert('Nombre, stack, substack y URL del repositorio son obligatorios');return;}}
   const r=await fetch('/api/projects/'+projectId+'/subprojects',{{method:'POST',headers:{{'Content-Type':'application/json'}},
-    body:JSON.stringify({{label,stack_key,substack,repo_dir,skills,dev_model_profile,qa_model_profile}})}});  
+    body:JSON.stringify({{label,stack_key,substack,repo_url,skills,dev_model_profile,qa_model_profile}})}});  
   const d=await r.json();
   if(!d.ok){{alert('Error: '+(d.error||''));return;}}
   alert('Subproyecto guardado');
@@ -1496,6 +1472,76 @@ async function createSprint(){{
 }}
 </script></body></html>"""
 
+
+def render_settings_page(data: dict) -> str:
+    project = data["project"]
+    platform_settings = data.get("platform_settings", {})
+    system_settings = data.get("system_settings", {})
+    subprojects = data.get("subprojects", [])
+
+    def esc(text: str) -> str:
+        return (text or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    def render_rules(items: list[str], empty_text: str) -> str:
+        if not items:
+            return f"<div style='font-size:12px;color:#64748b'>{empty_text}</div>"
+        return "".join(f"<li>{esc(item)}</li>" for item in items)
+
+    subproject_html = "".join(
+        f"<div style='padding:12px;border:1px solid #334155;border-radius:10px;background:#0f172a'>"
+        f"<div style='font-size:13px;font-weight:700;color:#e2e8f0'>{esc(item.get('label', item.get('id', 'Subproyecto')))}</div>"
+        f"<div style='font-size:11px;color:#94a3b8;margin-top:4px'>{esc(item.get('stack_key', ''))} / {esc(item.get('substack', ''))}</div>"
+        f"<div style='font-size:11px;color:#cbd5e1;margin-top:4px'>{esc(item.get('repo_url', ''))}</div>"
+        f"<div style='font-size:11px;color:#64748b;margin-top:4px'>Workspace: {esc(item.get('workspace_dir', ''))}</div>"
+        f"</div>"
+        for item in subprojects
+    ) or "<div style='font-size:12px;color:#64748b'>Sin subproyectos configurados.</div>"
+
+    return f"""<!doctype html><html lang="es"><head><meta charset="UTF-8"><title>VeloxIq · Configuracion</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+body{{margin:0;background:#020817;color:#e2e8f0;font-family:Inter,Segoe UI,Arial,sans-serif}}
+.wrap{{max-width:1100px;margin:0 auto;padding:24px}}
+.top{{display:flex;justify-content:space-between;align-items:center;margin-bottom:18px}}
+.section{{background:#13233d;border:1px solid #22314f;border-radius:16px;padding:18px;margin-bottom:16px}}
+.grid{{display:grid;grid-template-columns:1fr 1fr;gap:16px}}
+.btn{{display:inline-flex;align-items:center;justify-content:center;padding:10px 14px;border-radius:10px;background:#8b5cf6;color:#fff;text-decoration:none;font-weight:700}}
+</style></head><body>
+<div class="wrap">
+  <div class="top">
+    <div>
+      <h1 style="margin:0 0 4px">Configuracion actual</h1>
+      <div style="font-size:13px;color:#94a3b8">Proyecto actual: {esc(project.get('name', 'Sin proyecto'))}</div>
+    </div>
+    <a class="btn" href="/">Volver al tablero</a>
+  </div>
+  <div class="section">
+    <div style="font-size:14px;font-weight:700;margin-bottom:10px">Subproyectos</div>
+    <div class="grid">{subproject_html}</div>
+  </div>
+  <div class="grid">
+    <div class="section">
+      <div style="font-size:14px;font-weight:700;margin-bottom:10px">Perfiles globales</div>
+      <div style="font-size:12px;color:#cbd5e1;line-height:1.8">
+        <div>PM: {esc(system_settings.get('role_defaults', {}).get('pm', '') or 'sin perfil')}</div>
+        <div>Orchestrator: {esc(system_settings.get('role_defaults', {}).get('orchestrator', '') or 'sin perfil')}</div>
+        <div>Developers: {esc(system_settings.get('role_defaults', {}).get('developers', '') or 'sin perfil')}</div>
+        <div>QA: {esc(system_settings.get('role_defaults', {}).get('qa', '') or 'sin perfil')}</div>
+      </div>
+    </div>
+    <div class="section">
+      <div style="font-size:14px;font-weight:700;margin-bottom:10px">Reglas persistentes</div>
+      <div style="font-size:12px;color:#94a3b8;margin-bottom:6px">Codificacion</div>
+      <ul style="margin:0 0 12px 18px;color:#cbd5e1">{render_rules(platform_settings.get('coding_rules', []), 'Sin reglas configuradas.')}</ul>
+      <div style="font-size:12px;color:#94a3b8;margin-bottom:6px">Git y ramas</div>
+      <ul style="margin:0 0 12px 18px;color:#cbd5e1">{render_rules(platform_settings.get('git_rules', []), 'Sin reglas configuradas.')}</ul>
+      <div style="font-size:12px;color:#94a3b8;margin-bottom:6px">Optimizacion de tokens</div>
+      <ul style="margin:0 0 0 18px;color:#cbd5e1">{render_rules(platform_settings.get('token_optimization_rules', []), 'Sin reglas configuradas.')}</ul>
+    </div>
+  </div>
+</div>
+</body></html>"""
+
 # ── HTTP Handler ───────────────────────────────────────────────────────────────
 class Handler(BaseHTTPRequestHandler):
     def _json(self, data, status=200):
@@ -1512,6 +1558,10 @@ class Handler(BaseHTTPRequestHandler):
         if p in ("","/"):
             sprint_id = qs.get("sprint",[""])[0]
             data=build_data(sprint_id);html=render(data).encode("utf-8")
+            self.send_response(200);self.send_header("Content-Type","text/html; charset=utf-8");self.send_header("Content-Length",len(html));self.end_headers();self.wfile.write(html)
+        elif p == "/settings":
+            sprint_id = qs.get("sprint",[""])[0]
+            data=build_data(sprint_id);html=render_settings_page(data).encode("utf-8")
             self.send_response(200);self.send_header("Content-Type","text/html; charset=utf-8");self.send_header("Content-Length",len(html));self.end_headers();self.wfile.write(html)
         elif p.startswith("/api/agents/") and p.endswith("/log"):
             self._text(get_log(p.split("/")[3], lines=80))
@@ -1610,8 +1660,9 @@ class Handler(BaseHTTPRequestHandler):
                     current.get("git_dirs", {}),
                     {
                         "id": _generate_project_id(subproject_id),
+                        "project_id": project_id,
                         "label": body.get("label", ""),
-                        "repo_dir": body.get("repo_dir", ""),
+                        "repo_url": body.get("repo_url", body.get("repo_dir", "")),
                         "stack_key": body.get("stack_key", ""),
                         "substack": body.get("substack", ""),
                         "skills": body.get("skills") or default_skills_for_scope(body.get("stack_key", ""), body.get("substack", "")),
