@@ -771,7 +771,7 @@ async function loadProjectList(){{
   const projects=await r.json();
   let html='<div style="font-size:10px;color:#64748b;margin-bottom:8px">Cambiar proyecto:</div>';
   for(const p of projects){{
-    html+=`<button class="btn btn-outline btn-sm" style="width:100%;text-align:left;margin-bottom:4px;padding:6px;font-size:11px" onclick="selectProject('{{p.project_id}}')">✓ {{p.project_id}}: {{p.name}}</button>`;
+    html+=`<button class="btn btn-outline btn-sm" style="width:100%;text-align:left;margin-bottom:4px;padding:6px;font-size:11px" onclick="selectProject('${{p.project_id}}')">✓ ${{p.project_id}}: ${{p.name}}</button>`;
   }}
   document.getElementById('project-list').innerHTML=html;
 }}
