@@ -1,81 +1,94 @@
 # MVP Roadmap
 
-Este documento organiza la evolucion del sistema en 3 MVP secuenciales.
+This document tracks the evolution of the platform across the three original MVPs and the additional manager feature set that is now part of `develop`.
 
-## Objetivo general
+## General Goal
 
-Generalizar el sistema actual de gestion multiagente sin perder:
+Generalize the original local multi-agent delivery system without losing:
 
-- la logica ya implementada de tablero local
-- la politica actual de distribucion de trabajo
-- los roles base PM, Orchestrator, Dev y QA
-- los stacks actuales BACK, BO y MOB
-- los prompts tecnicos ya creados como casos especiales reutilizables
+- the local board execution model
+- the existing PM, Orchestrator, Developer, and QA role split
+- the default assignment behavior
+- stack-aware prompts and agent specialization
+- git-integrated software delivery as the primary supported workflow
 
-## Principios de migracion
+## Migration Principles
 
-- Compatibilidad primero, extension despues.
-- No romper el flujo actual del tablero local.
-- No hardcodear reglas del sistema dentro de prompts estaticos.
-- Convertir el comportamiento actual en configuracion y presets.
-- Separar claramente rol, stack, especializacion y contexto runtime.
+- Preserve compatibility first, extend behavior second.
+- Keep the local board as the default source of truth.
+- Move hardcoded behavior into configuration where practical.
+- Separate role, stack, specialization, project context, and team context.
+- Keep platform-wide rules independent from project-specific state.
 
-## Fases
+## MVP Sequence
 
 ### MVP 1
 
-Limpieza de prompts y nuevo modelo configurable de agentes por stack.
+Prompt cleanup and configurable stack-specialized agents.
 
-Documento detallado: `docs/mvp1-clean-prompts-and-stack-agents.md`
+Reference:
+
+- [mvp1-clean-prompts-and-stack-agents.md](/C:/Trabajo/AgenticLocalManager_Proyect/docs/mvp1-clean-prompts-and-stack-agents.md)
 
 ### MVP 2
 
-Generalizacion del equipo y de la asignacion sin perder la politica actual.
+Reusable teams and assignment generalization.
 
-Documento detallado: `docs/mvp2-team-and-assignment-generalization.md`
+Reference:
+
+- [mvp2-team-and-assignment-generalization.md](/C:/Trabajo/AgenticLocalManager_Proyect/docs/mvp2-team-and-assignment-generalization.md)
 
 ### MVP 3
 
-Plataforma base por templates de proyecto con adapters desacoplados.
+Project templates and platform core.
 
-Documento detallado: `docs/mvp3-project-templates-and-platform-core.md`
+Reference:
 
-## Orden de ejecucion
+- [mvp3-project-templates-and-platform-core.md](/C:/Trabajo/AgenticLocalManager_Proyect/docs/mvp3-project-templates-and-platform-core.md)
 
-1. Ejecutar MVP 1 y validar compatibilidad total con el equipo actual.
-2. Ejecutar MVP 2 y validar que la asignacion siga replicando el comportamiento actual.
-3. Ejecutar MVP 3 solo cuando MVP 1 y MVP 2 queden estables.
+## Execution Order
 
-## Estado actual
+1. Complete MVP 1 while preserving the current team and prompt behavior.
+2. Complete MVP 2 while preserving the assignment baseline.
+3. Complete MVP 3 only after MVP 1 and MVP 2 are stable.
 
-Actualizado al `2026-03-10`.
+## Current Status
 
-- `MVP 1` completado y fusionado en `develop`
-- `MVP 2` completado y fusionado en `develop`
-- `MVP 3` completado en su base de templates/contexto y fusionado en `develop`
-- feature adicional de manager fusionada en `develop`:
-  - proyecto activo persistente con restore por proyecto
-  - sprint obligatorio asociado a proyecto
-  - sprint obligatorio asociado a equipo reusable
-  - equipos reutilizables por `stack/substack`
-  - skills reutilizables por equipo
-  - restriccion de alta de devs segun skills del equipo activo
-  - bloqueo de borrado para devs ya asociados al equipo del sprint
+Updated on `2026-03-10`.
 
-## Estado del sistema en `develop`
+- `MVP 1`: completed and merged into `develop`
+- `MVP 2`: completed and merged into `develop`
+- `MVP 3`: completed and merged into `develop`
+- additional manager feature set: completed and merged into `develop`
+- Windows installer and launcher flow: implemented on `develop`
+- project-first onboarding and subproject onboarding: implemented on `develop`
 
-- prompts por rol, stack y especializacion ya separados
-- politica de asignacion encapsulada
-- presets/equipos reutilizables disponibles
-- templates de proyecto versionados disponibles
-- dashboard con seleccion de proyecto, creacion de proyecto y creacion de sprint con equipo
-- persistencia local de contexto por proyecto y ultimo sprint seleccionado
+## Current System State In `develop`
 
-## Entregable esperado al final de los 3 MVP
+The current system includes:
 
-- prompts base por rol limpios y reutilizables
-- prompts tecnicos por stack y especializacion
-- agentes configurables por stack y rol
-- presets de equipo reutilizables
-- politica de asignacion actual encapsulada como politica por defecto
-- soporte para multiples tipos de proyecto sin perder software delivery como caso principal
+- layered prompt composition by role, stack, and specialization
+- reusable assignment policy with the original local-board behavior as default
+- reusable team presets by stack and substack
+- project templates and project runtime restore
+- sprint creation bound to `project + subproject + team`
+- developer skill constraints based on the active sprint team
+- platform-wide coding, git, and token optimization rules
+- installer-driven global configuration for git and LLM services
+- dashboard onboarding that blocks board usage until project and subproject setup exist
+
+## Current Deliverable
+
+At this point the platform provides:
+
+- reusable base prompts and stack prompts
+- configurable agents and reusable team presets
+- project and subproject runtime context
+- local storage-backed sprint execution
+- project-aware dashboard filtering and restore
+- placeholder-safe installer and launcher support for Windows
+
+## Follow-up Direction
+
+The main remaining platform-level gap is runtime provider abstraction. The installer and system settings already persist multi-provider choices, but PM, Developer, QA, and Orchestrator runtime loops still need deeper provider routing to fully exploit that configuration.
+

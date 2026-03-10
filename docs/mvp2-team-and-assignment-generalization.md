@@ -1,145 +1,98 @@
 # MVP 2 - Team And Assignment Generalization
 
-## Objetivo
+## Goal
 
-Generalizar la configuracion del equipo y la asignacion automatica de trabajo sin perder la politica actual de distribucion implementada en el tablero local.
+Generalize team configuration and automatic task assignment while preserving the original local-board assignment behavior.
 
-## Problema que resuelve
+## Problem Solved
 
-Hoy la asignacion esta pensada principalmente para un conjunto fijo de agentes. Eso limita:
+The original assignment behavior assumed a mostly fixed team layout. That limited:
 
-- la cantidad de agentes por stack
-- el uso de QA por stack
-- la creacion de equipos distintos segun tipo de proyecto
-- la evolucion de la politica actual sin tocar el core
+- the number of developers per stack
+- stack-specific QA scaling
+- reusable team patterns across project types
+- future assignment evolution without touching orchestration core logic
 
-## Resultado esperado
+## Expected Result
 
-Al finalizar este MVP, el sistema debe permitir:
+At the end of MVP 2, the system should support:
 
-- multiples developers por stack
-- multiples QA por stack
-- plantillas de equipo reutilizables
-- elegibilidad de asignacion por `role + stack + enabled`
-- mantener la politica actual como politica por defecto
+- multiple developers per stack
+- multiple QA roles per stack
+- reusable team presets
+- assignment eligibility by `role + stack + enabled`
+- the original assignment strategy as the default policy
 
-## Alcance funcional
+## Scope
 
-- encapsular la politica actual de asignacion
-- hacer configurable la elegibilidad de agentes
-- soportar equipos distintos sin hardcode
-- conservar el flujo actual del tablero
+- encapsulate the original assignment behavior
+- make agent eligibility configurable
+- support multiple reusable teams without hardcoding
+- preserve the local board workflow
 
-## No incluye
+## Exclusions
 
-- redefinicion general de workflows
-- templates de proyecto multiproposito
-- desacople total de adapters externos
+- broad workflow redesign
+- project template generalization
+- full adapter decoupling
 
-## Cambios de arquitectura
+## Architecture Change
 
-### Politica de asignacion
+### Assignment policy
 
-Introducir una interfaz tipo:
-
-- `AssignmentPolicy`
-
-Implementacion inicial:
+Introduce an assignment policy interface with:
 
 - `LocalBoardDefaultAssignmentPolicy`
 
-Esta politica debe replicar exactamente el comportamiento actual:
+This policy preserves:
 
-- respeto por dependencias
-- prioridad de fix tasks
-- manejo de tareas secuenciales
-- uso de developers habilitados
-- exclusion de sprints pausados
+- dependency awareness
+- fix-task priority
+- sequential task handling
+- enabled developer usage
+- paused sprint exclusion
 
-### Modelo de equipo
+### Team model
 
-Introducir plantillas de equipo configurables:
+Introduce reusable team presets such as:
 
 - `default_software_team`
 - `backend_only_team`
 - `web_team`
 - `mobile_team`
 
-Cada plantilla debe definir:
+Each preset defines:
 
-- agentes incluidos
-- stacks soportados
-- reglas de elegibilidad
-- cantidad sugerida por rol
+- included agents or eligibility scope
+- supported stacks
+- eligibility rules
+- suggested role counts
 
-## Cambios por modulo
+## Acceptance Criteria
 
-### Orchestrator
+- assignment behavior remains equivalent to the existing workflow baseline
+- the system supports multiple developers for the same stack
+- the system supports stack-specific QA
+- team selection is configuration-driven
+- the baseline preset remains usable
 
-- extraer logica de asignacion a una politica inyectable
-- dejar el modulo actual como consumidor de la politica, no como implementacion total
+## Status
 
-### Agent manager
+Status: `completed`
 
-- soportar plantillas de equipo
-- permitir activar o desactivar agentes por stack
-- listar agentes elegibles por stack y rol
+Implemented in `develop` with:
 
-### Dashboard
+- [app_core/assignment_policy.py](/C:/Trabajo/AgenticLocalManager_Proyect/app_core/assignment_policy.py)
+- reusable team presets in [config/agent_presets.json](/C:/Trabajo/AgenticLocalManager_Proyect/config/agent_presets.json)
+- configurable agent eligibility in [app_core/agent_manager.py](/C:/Trabajo/AgenticLocalManager_Proyect/app_core/agent_manager.py)
+- dashboard visibility for eligibility and stack activation
 
-- mostrar por que un agente es elegible o no
-- permitir elegir plantilla de equipo
-- permitir activar agentes para BACK, BO o MOB
+## Post-MVP Evolution
 
-## Criterios de aceptacion
+After the core MVP 2 work, the platform evolved further:
 
-- la asignacion actual debe seguir produciendo los mismos resultados sobre el workflow vigente
-- debe ser posible tener varios devs del mismo stack
-- debe ser posible tener QA especializado por stack
-- debe ser posible cambiar de plantilla sin tocar codigo
-- el preset actual debe seguir funcionando como referencia base
+- the active team is no longer switched manually as a global setting
+- teams are now assigned at sprint creation time
+- sprint runtime derives the active team from the selected sprint
+- developer creation is restricted by the active sprint team skill set
 
-## Riesgos
-
-- introducir divergencia entre la politica nueva y la actual
-- romper el orden de prioridad entre fix tasks y todo tasks
-- hacer demasiado abstracta la elegibilidad en esta fase
-
-## Mitigacion
-
-- congelar la politica actual como baseline
-- agregar pruebas de regresion sobre escenarios del tablero local
-- no cambiar estados ni transiciones en este MVP
-
-## Plan de ejecucion
-
-1. Extraer la politica actual del orchestrator.
-2. Definir interfaz de asignacion.
-3. Crear `LocalBoardDefaultAssignmentPolicy`.
-4. Mover reglas de elegibilidad de agentes a configuracion.
-5. Crear plantillas de equipo.
-6. Validar escenarios BACK, BO y MOB.
-
-## Definition of done
-
-- politica actual encapsulada y reutilizable
-- soporte para multiples agentes por stack
-- soporte para QA por stack
-- plantillas de equipo activables
-- asignacion actual preservada como comportamiento por defecto
-
-## Estado actual
-
-Estado: `completado`
-
-Quedo incorporado en `develop` con:
-
-- `LocalBoardDefaultAssignmentPolicy` como baseline operativa
-- elegibilidad configurable por `role + stack + enabled`
-- presets/equipos reutilizables en `config/agent_presets.json`
-- dashboard mostrando elegibilidad y activacion por stack
-
-Nota de evolucion posterior:
-
-- el cambio manual de equipo global fue reemplazado por equipo derivado del sprint activo
-- los equipos siguen siendo reutilizables, pero ahora se asignan al crear cada sprint

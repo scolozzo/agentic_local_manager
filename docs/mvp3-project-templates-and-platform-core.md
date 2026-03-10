@@ -1,153 +1,92 @@
 # MVP 3 - Project Templates And Platform Core
 
-## Objetivo
+## Goal
 
-Convertir el sistema en una base reusable para distintos tipos de proyecto, manteniendo software delivery como template principal y mejor soportado.
+Turn the system into a reusable platform foundation for multiple software delivery project shapes while keeping software delivery as the primary supported template.
 
-## Problema que resuelve
+## Problem Solved
 
-Aunque el sistema ya tenga agentes y tablero, sigue estando orientado a un caso puntual. Falta:
+Even with agents and a local board already in place, the system was still centered on a single project pattern. What was missing:
 
-- templates de proyecto
-- desacople entre core y adapters
-- workflows configurables por proyecto
-- una base realmente reusable
+- project templates
+- reusable project context
+- clearer separation between platform core and integrations
+- project-aware workflow visibility
 
-## Resultado esperado
+## Expected Result
 
-Al finalizar este MVP, el sistema debe poder operar como plataforma base con:
+At the end of MVP 3, the platform should support:
 
-- core de board y workflow desacoplado
-- adapters externos enchufables
-- templates de proyecto versionados
-- software backend, software web y software mobile como templates iniciales
+- versioned project templates
+- project-aware workflow and stack validation
+- reusable project runtime context
+- a stable base for backend, web, and mobile delivery
 
-## Alcance funcional
+## Scope
 
-- separar core, adapters y templates
-- convertir el flujo actual en template `software_delivery_default`
-- permitir que cada proyecto seleccione template
-- mantener compatibilidad con el tablero local como repositorio principal
+- introduce project templates
+- map projects to templates
+- preserve the local board as the default runtime store
+- expose project and workflow context in the dashboard
 
-## No incluye
+## Exclusions
 
-- soporte completo para todos los dominios posibles
-- reemplazo obligatorio de Telegram, GitLab o dashboard
-- multitenancy compleja
+- full domain abstraction for every possible project type
+- mandatory replacement of Telegram, GitLab, or the dashboard
+- complex multi-tenant platform behavior
 
-## Cambios de arquitectura
+## Architecture Change
 
-### Core
+### Template catalog
 
-Separar modulos en:
-
-```text
-core/
-  board/
-  workflow/
-  assignment/
-  agents/
-  prompts/
-```
-
-### Adapters
-
-Crear borde de integracion para:
-
-- storage
-- messaging
-- repository
-- llm
-- dashboard
-
-### Templates
-
-Primeros templates:
+The initial template catalog includes:
 
 - `software_delivery_default`
 - `software_backend`
 - `software_web`
 - `software_mobile`
 
-Cada template define:
+Each template defines:
 
-- workflow base
-- stacks permitidos
-- roles requeridos
-- presets sugeridos
-- reglas de artefactos esperados
+- workflow
+- allowed stacks
+- required roles
+- suggested preset
+- expected artifacts
 
-## Cambios por modulo
+### Project runtime context
 
-### Core board
+Projects now resolve through:
 
-- centralizar entidades de task, sprint, comment, transition y artifact
+- [app_core/project_templates.py](/C:/Trabajo/AgenticLocalManager_Proyect/app_core/project_templates.py)
+- [app_core/project_context.py](/C:/Trabajo/AgenticLocalManager_Proyect/app_core/project_context.py)
+- [app_core/project_validation.py](/C:/Trabajo/AgenticLocalManager_Proyect/app_core/project_validation.py)
 
-### Workflow
+## Acceptance Criteria
 
-- convertir estados y transiciones actuales en definicion reusable
+- the system still runs with `software_delivery_default` without a functional regression
+- backend, web, and mobile template variants exist
+- project selection and workflow visibility are dashboard-visible
+- local board storage remains the default source of truth
 
-### Dashboard
+## Status
 
-- selector de template de proyecto
-- visualizacion de workflow activo
+Status: `completed`
 
-### Configuracion
+Implemented in `develop` with:
 
-- nuevo catalogo de templates
-- mapeo entre proyecto y template
+- versioned template catalog in [config/project_templates.json](/C:/Trabajo/AgenticLocalManager_Proyect/config/project_templates.json)
+- project runtime restore in [app_core/project_context.py](/C:/Trabajo/AgenticLocalManager_Proyect/app_core/project_context.py)
+- local storage support for project runtime in [app_core/memory_store.py](/C:/Trabajo/AgenticLocalManager_Proyect/app_core/memory_store.py)
+- dashboard-level project selection and template visibility in [dashboard.py](/C:/Trabajo/AgenticLocalManager_Proyect/dashboard.py)
 
-## Criterios de aceptacion
+## Post-MVP Evolution
 
-- el sistema puede correr usando `software_delivery_default` sin cambio funcional respecto al comportamiento actual
-- debe existir template separado para backend, web y mobile
-- los adapters deben estar desacoplados del core
-- el tablero local debe seguir siendo la fuente de verdad por defecto
+After MVP 3 was merged, the platform added:
 
-## Riesgos
-
-- intentar abstraer demasiado pronto
-- romper compatibilidad con el software delivery actual
-- dispersar la configuracion entre demasiados archivos
-
-## Mitigacion
-
-- usar el workflow actual como template fundador
-- no introducir nuevos estados sin necesidad
-- mantener un template default obligatorio
-
-## Plan de ejecucion
-
-1. Extraer core de board y workflow.
-2. Definir interfaces de adapters.
-3. Mover integraciones externas a adapters.
-4. Crear templates iniciales.
-5. Conectar dashboard y configuracion al selector de template.
-6. Validar equivalencia funcional con el flujo actual.
-
-## Definition of done
-
-- core desacoplado y reusable
-- adapters identificados y separados
-- templates iniciales versionados
-- workflow actual representado como template principal
-- base lista para extender a otros tipos de proyecto por configuracion
-
-## Estado actual
-
-Estado: `completado`
-
-Quedo incorporado en `develop` con:
-
-- `config/project_templates.json` como catalogo versionado
-- `app_core/project_templates.py` y `app_core/project_context.py`
-- validacion de configuracion de proyecto por familias de repositorio
-- dashboard con selector de proyecto y template
-- persistencia de `template_id` y `project_id` en el storage local
-- tablero filtrado por proyecto
-
-Extension agregada despues del cierre base de MVP 3:
-
-- runtime state por proyecto con restore del ultimo sprint
-- sprint asociado a `project_id + team_id + substack`
-- equipos reutilizables por stack/substack desacoplados del proyecto
+- persistent restore of the last active `project + sprint + team + subproject`
+- subproject-aware repo configuration
+- sprint binding to `project_id + subproject_id + team_id`
+- reusable teams by stack and substack
+- Windows installer and system-level LLM/git configuration persistence
+- dashboard onboarding that hides the board and agents until project and subproject setup is complete
