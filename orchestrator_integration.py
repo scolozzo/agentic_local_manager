@@ -12,6 +12,7 @@ from app_core.state_manager import StateManager
 from app_core.memory_store import MemoryStore
 from app_core.config_loader import get_gitlab_project_id, get_develop_branch
 from app_core.agent_config import load_repo_env
+from app_core.assignment_policy import LocalBoardDefaultAssignmentPolicy
 
 # Load environment
 from dotenv import load_dotenv
@@ -33,34 +34,11 @@ _token_logger = TokenLogger()
 _memory_store = MemoryStore()
 _state_manager = StateManager(memory_store=_memory_store)
 
-_DONE_STATES = {"Merged", "ReadyToMerge"}
-
-def _deps_met(task: dict) -> bool:
-    """Return True if all task dependencies are in a done state (Merged/ReadyToMerge)."""
-    deps = task.get("depends_on", [])
-    if not deps:
-        return True
-    for dep_id in deps:
-        dep_task = _memory_store.board_get_task(dep_id)
-        if not dep_task or dep_task["state"] not in _DONE_STATES:
-            return False
-    return True
-
-
-_FALLBACK_DEVS = ["botidev1", "botidev2", "botidev3"]
-
-def _get_active_devs() -> list[str]:
-    """Return board-assignee login names of enabled dev agents."""
-    try:
-        from app_core.agent_manager import load_agents
-        agents = load_agents()
-        return [
-            a.get("login", a["id"])
-            for a in agents
-            if a.get("type", "dev") == "dev" and a.get("enabled", True)
-        ]
-    except Exception:
-        return _FALLBACK_DEVS
+_assignment_policy = LocalBoardDefaultAssignmentPolicy(
+    memory_store=_memory_store,
+    state_manager=_state_manager,
+    notify_pm_event=lambda task_id, event_type, details: notify_pm_event(task_id, event_type, details),
+)
 
 
 def notify_pm_event(task_id, event_type, details):
@@ -144,118 +122,13 @@ def assign_pending_tasks():
             _memory_store.purge_task_transitions(stuck["task_id"])
             _memory_store.mark_task_not_found(stuck["task_id"], "orchestrator")
 
-    # Priority fix tasks from memory store
-    fix_tasks = _memory_store.get_fix_tasks_by_priority()
-    fix_critical = [t for t in fix_tasks if t["priority"] == "Critical"]
-    fix_grave    = [t for t in fix_tasks if t["priority"] == "Grave"]
-    if fix_critical or fix_grave:
-        print(f"Orchestrator: Found {len(fix_critical)} Critical + {len(fix_grave)} Grave Fix tasks", flush=True)
-
-    # Busy devs = those with an InProgress task
-    busy_devs = _memory_store.board_get_busy_assignees("InProgress")
-    free_devs = [d for d in _get_active_devs() if d not in busy_devs]
-
-    if not free_devs:
-        print("Orchestrator: All developers are busy. Skipping assignment.", flush=True)
-        return
-
-    # Filter by active sprint if one exists
-    active_sprint = _memory_store.sprint_get_active()
-    sprint_id = active_sprint["sprint_id"] if active_sprint else ""
-
-    # Get assignable tasks (Todo state, unassigned)
-    todo_tasks = _memory_store.board_get_tasks_by_state("Todo", sprint_id=sprint_id)
-    assignable = [t for t in todo_tasks if t.get("assignee", "") in ("", "orchestrator")]
-    # Skip tasks from paused sprints
-    assignable = [t for t in assignable if t.get("sprint_id", "") not in paused_sprints]
-
-    # Filter out tasks whose dependencies are not yet Merged
-    assignable = [t for t in assignable if _deps_met(t)]
-
-    # Sort by priority (High > Medium > Low) then FIFO within same priority
-    _PRIORITY_ORDER = {"High": 0, "Critical": 0, "Medium": 1, "Grave": 1, "Low": 2, "Mejora": 2}
-
-    def task_order(t):
-        prio = _PRIORITY_ORDER.get(t.get("priority", "Medium"), 1)
-        try:
-            seq = int(t["task_id"].split("-")[-1])
-        except Exception:
-            seq = 999
-        return (prio, seq)
-
-    assignable.sort(key=task_order)
+    stats = _assignment_policy.assign_pending_tasks()
     print(
-        f"Orchestrator: {len(assignable)} Todo tasks, {len(busy_devs)} devs busy,"
-        f" {len(free_devs)} free.",
+        f"Orchestrator: {stats.get('todo', 0)} Todo tasks,"
+        f" {stats.get('busy', 0)} devs busy, {stats.get('free', 0)} free.",
         flush=True,
     )
-
-    # Check if any sequential (parallel=False) task is already InProgress in this sprint
-    sequential_in_progress = False
-    if sprint_id:
-        inprog = _memory_store.board_get_tasks_by_state("InProgress", sprint_id=sprint_id)
-        sequential_in_progress = any(not t.get("parallel", True) for t in inprog)
-
-    assigned_dev_index = 0
-    assigned_count = 0
-
-    def try_assign(task_id):
-        nonlocal assigned_dev_index, assigned_count, sequential_in_progress
-        if assigned_dev_index >= len(free_devs):
-            return False
-
-        task = _memory_store.board_get_task(task_id)
-        is_parallel = task.get("parallel", True) if task else True
-
-        # Sequential tasks: skip if another sequential task is already running
-        if not is_parallel and sequential_in_progress:
-            print(
-                f"Orchestrator: [SKIP] {task_id} is sequential but another sequential task is running",
-                flush=True,
-            )
-            return False
-
-        dev_login = free_devs[assigned_dev_index]
-
-        # Race condition check
-        is_race, err = _state_manager.check_concurrent_assignment(task_id, "orchestrator")
-        if is_race:
-            print(f"Orchestrator: [WARN] Race condition on {task_id}: {err}", flush=True)
-            return False
-
-        result = _state_manager.transition(
-            task_id=task_id,
-            target_state=f"InProgress assignee {dev_login}",
-            agent_id="orchestrator",
-            reason=f"Auto-assigned to {dev_login}",
-            max_retries=3,
-        )
-        if result["ok"]:
-            notify_pm_event(task_id, "WORK_STARTED", f"Auto-asignado a {dev_login}")
-            assigned_dev_index += 1
-            assigned_count += 1
-            if not is_parallel:
-                sequential_in_progress = True
-            return True
-        return False
-
-    # Priority 1: Critical fix tasks
-    for ft in fix_critical[:len(free_devs)]:
-        try_assign(ft["fix_task_id"])
-
-    # Priority 2: Grave fix tasks
-    for ft in fix_grave[:len(free_devs)]:
-        try_assign(ft["fix_task_id"])
-
-    # Priority 3: Normal Todo tasks (only if no unresolved critical/grave)
-    unresolved = fix_critical[assigned_count:] + fix_grave[assigned_count:]
-    if not unresolved:
-        for task in assignable:
-            if assigned_dev_index >= len(free_devs):
-                break
-            try_assign(task["task_id"])
-
-    print(f"Orchestrator: Assigned {assigned_count} tasks this cycle", flush=True)
+    print(f"Orchestrator: Assigned {stats.get('assigned', 0)} tasks this cycle", flush=True)
 
 
 def handle_fixing_tasks():
@@ -272,80 +145,9 @@ def handle_fixing_tasks():
         return
 
     print(f"Orchestrator: handle_fixing_tasks -- checking {len(fixing_tasks)} Fixing tasks...", flush=True)
-
-    busy_devs = _memory_store.board_get_busy_assignees("InProgress")
-    free_devs = [d for d in _get_active_devs() if d not in busy_devs]
-
-    _fix_assigned = 0
-
-    for task in fixing_tasks:
-        task_id = task["task_id"]
-        fix_tasks_in_db = _memory_store.get_fix_tasks_for_task(task_id)
-
-        if not fix_tasks_in_db:
-            assignee = task.get("assignee", "")
-            if assignee in _get_active_devs():
-                print(
-                    f"Orchestrator: {task_id} Fixing -> @{assignee} assigned, working directly",
-                    flush=True,
-                )
-            else:
-                # No fix sub-tasks, no dev -> revert to QA for review
-                print(
-                    f"Orchestrator: {task_id} Fixing with no Fix sub-tasks and no dev"
-                    f" -> reverting to QA for review",
-                    flush=True,
-                )
-                ok = _state_manager.transition(task_id, "QA", "orchestrator",
-                                               reason="No Fix sub-tasks created, QA to review")
-                if ok["ok"]:
-                    notify_pm_event(
-                        task_id, "FIXING_REVERTED",
-                        f"No Fix tasks for {task_id}. Reverted to QA to create Fix tasks.",
-                    )
-                    print(f"Orchestrator: [OK] {task_id} reverted to QA", flush=True)
-            continue
-
-        # Check state of each Fix task in local board
-        done_states = {"Merged", "ReadyToMerge", "Blocked"}
-        pending_fix_ids = []
-        all_done = True
-
-        for ft in fix_tasks_in_db:
-            ft_task = _memory_store.board_get_task(ft["fix_task_id"])
-            if ft_task is None:
-                # Fix task removed -> treat as done, clean up link
-                _memory_store.delete_fix_task_link(ft["fix_task_id"])
-                continue
-            if ft_task["state"] not in done_states:
-                all_done = False
-                if ft_task["state"] == "Todo":
-                    pending_fix_ids.append(ft["fix_task_id"])
-
-        if all_done:
-            print(
-                f"Orchestrator: {task_id} -- all {len(fix_tasks_in_db)} Fix tasks done"
-                f" (QA will advance to ReadyToMerge)",
-                flush=True,
-            )
-        elif pending_fix_ids:
-            for ft_id in pending_fix_ids:
-                if not free_devs:
-                    break
-                dev = free_devs.pop(0)
-                print(f"Orchestrator: Assigning Fix task {ft_id} (for {task_id}) to @{dev}", flush=True)
-                result = _state_manager.transition(
-                    task_id=ft_id,
-                    target_state=f"InProgress assignee {dev}",
-                    agent_id="orchestrator",
-                    reason=f"Fix task for {task_id} -- auto-assigned",
-                    max_retries=2,
-                )
-                if result["ok"]:
-                    _fix_assigned += 1
-
-    if _fix_assigned:
-        print(f"Orchestrator: handle_fixing_tasks assigned {_fix_assigned} Fix tasks", flush=True)
+    stats = _assignment_policy.assign_fixing_tasks()
+    if stats.get("assigned"):
+        print(f"Orchestrator: handle_fixing_tasks assigned {stats['assigned']} Fix tasks", flush=True)
 
 
 def handle_orchestration():
