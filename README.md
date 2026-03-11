@@ -11,6 +11,12 @@ The platform coordinates these core roles:
 - `Developers`: execute assigned work for the active sprint and subproject scope.
 - `QA`: reviews completed work, creates fix tasks, and certifies outputs.
 
+## Branch Policy
+
+- `feature/gui_windows_installer` is a Windows-specific fork line.
+- This branch must not be merged into `develop`.
+- Only project-level fixes that are explicitly selected and re-applied without installer-specific files may be promoted to `develop`.
+
 The current `develop` branch supports:
 
 - reusable prompt composition by `role + stack + specialization`
@@ -198,4 +204,3 @@ As of `2026-03-10`, `develop` includes:
 - manager feature set completed
 - Windows installer and launcher added
 - project-first and subproject-first onboarding added
-
