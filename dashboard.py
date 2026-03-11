@@ -37,6 +37,7 @@ from app_core.project_subprojects import (
 )
 from app_core.project_templates import get_workflow_definition, get_project_template, list_project_templates
 from app_core.project_validation import validate_project_configuration, resolve_stack_for_project
+from app_core.substack_skill_docs import list_skill_docs, save_skill_doc
 from app_core.system_settings import list_available_model_profiles, load_system_settings
 
 BASE_DIR = Path(__file__).parent
@@ -562,15 +563,11 @@ def render(data: dict) -> str:
     <div style="font-size:12px;color:#94a3b8;margin-bottom:12px">El sistema necesita primero un proyecto. Hasta que no exista uno, no se muestran tablero ni agentes.</div>
     <div class="fg">
       <label>Nombre del proyecto</label>
-      <input type="text" id="onboard-proj-name" placeholder="Nombre completo" oninput="updateGeneratedProjectId('onboard')">
+      <input type="text" id="onboard-proj-name" placeholder="Nombre completo">
     </div>
     <div class="fg">
       <label>Descripcion</label>
       <input type="text" id="onboard-proj-desc" placeholder="Descripcion breve">
-    </div>
-    <div class="fg">
-      <label>ID generado</label>
-      <input type="text" id="onboard-proj-id" placeholder="Se genera automaticamente" readonly>
     </div>
     <button class="btn btn-green" onclick="createProject()" style="width:100%">Crear proyecto</button>
   </div>
@@ -609,6 +606,11 @@ def render(data: dict) -> str:
       <div class="fg">
         <label>Skills del substack</label>
         <select id="subproject-skills" multiple style="height:120px"></select>
+      </div>
+      <div class="fg">
+        <label>Documentos .md del substack</label>
+        <div id="subproject-skill-docs" class="skill-doc-list"></div>
+        <button class="btn btn-outline btn-sm" onclick="openSkillDocModal('main')" type="button" style="margin-top:8px">Agregar skill .md</button>
       </div>
       <div class="fg">
         <label>Modelo por defecto para los 3 developers</label>
@@ -659,6 +661,9 @@ h1{{font-size:20px;font-weight:700}}
 .topbar{{display:flex;align-items:center;gap:12px;margin-bottom:18px;flex-wrap:wrap;padding:10px 0}}
 .topbar h1{{margin:0;font-size:20px}}
 .topbar .subtitle{{margin:0;color:#64748b;font-size:12px;flex:1}}
+.skill-doc-list{{display:flex;flex-direction:column;gap:8px}}
+.skill-doc-item{{border:1px solid #334155;border-radius:10px;padding:8px 10px;background:#0f172a;display:flex;justify-content:space-between;align-items:center;gap:10px}}
+.skill-doc-empty{{font-size:11px;color:#64748b;border:1px dashed #334155;border-radius:10px;padding:10px;background:#0f172a}}
 .topbar .btn{{margin:0}}
 .topbar-divider{{width:1px;height:24px;background:#334155;margin:0 6px}}
 .btn{{border:none;border-radius:7px;padding:7px 14px;font-size:12px;cursor:pointer;font-weight:600}}
@@ -847,6 +852,25 @@ select,input[type=text]{{width:100%;background:#0f172a;border:1px solid #334155;
       <button class="btn btn-gray" onclick="document.getElementById('mbg').classList.remove('open')">Cancelar</button>
       <button class="btn btn-green" onclick="addAgent()">Agregar</button>
     </div>
+</div>
+</div>
+<div class="modal-bg" id="skill-doc-modal-bg">
+  <div class="modal" style="width:720px;max-height:90vh;overflow-y:auto">
+    <h3>Skill markdown del substack</h3>
+    <input type="hidden" id="skill-doc-scope" value="main">
+    <input type="hidden" id="skill-doc-id" value="">
+    <div class="fg">
+      <label>Titulo del documento</label>
+      <input type="text" id="skill-doc-title" placeholder="Ej: API response conventions">
+    </div>
+    <div class="fg">
+      <label>Contenido .md</label>
+      <textarea id="skill-doc-content" style="height:280px" placeholder="# API response conventions&#10;&#10;- Use typed DTOs&#10;- Paginate list endpoints"></textarea>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-gray" onclick="closeSkillDocModal()">Cancelar</button>
+      <button class="btn btn-green" onclick="saveSkillDoc()">Guardar .md</button>
+    </div>
   </div>
 </div>
 <!-- UNIFIED CONFIG MODAL -->
@@ -860,15 +884,11 @@ select,input[type=text]{{width:100%;background:#0f172a;border:1px solid #334155;
         <div id="project-list" style="max-height:150px;overflow-y:auto;margin-bottom:12px"></div>
         <div class="fg">
           <label>Nombre del Proyecto</label>
-          <input type="text" id="new-proj-name" placeholder="Nombre completo" oninput="updateGeneratedProjectId()">
+          <input type="text" id="new-proj-name" placeholder="Nombre completo">
         </div>
         <div class="fg">
           <label>Descripcion</label>
           <input type="text" id="new-proj-desc" placeholder="Detalles del proyecto">
-        </div>
-        <div class="fg">
-          <label>ID generado</label>
-          <input type="text" id="new-proj-id" placeholder="Se genera automaticamente" readonly>
         </div>
         <button class="btn btn-green" onclick="createProject()" style="width:100%">Crear Proyecto</button>
       </div>
@@ -905,6 +925,11 @@ select,input[type=text]{{width:100%;background:#0f172a;border:1px solid #334155;
         <div class="fg">
           <label>Skills del substack</label>
           <select id="subproject-skills-config" multiple style="height:120px"></select>
+        </div>
+        <div class="fg">
+          <label>Documentos .md del substack</label>
+          <div id="subproject-skill-docs-config" class="skill-doc-list"></div>
+          <button class="btn btn-outline btn-sm" onclick="openSkillDocModal('config')" type="button" style="margin-top:8px">Agregar skill .md</button>
         </div>
         <div class="fg">
           <label>Modelo por defecto para developers</label>
@@ -1063,15 +1088,26 @@ const SPRINTS = {json.dumps(sprints)};
 const MODEL_PROFILES = {json.dumps(model_profiles)};
 const SYSTEM_ROLE_DEFAULTS = {json.dumps(system_settings.get("role_defaults", {}))};
 const SUBSTACK_OPTIONS = {json.dumps({key: list_substack_options(key) for key in ("BACK", "BO", "MOB")})};
+const SUBSTACK_DOCS_CACHE = {{}};
 let sprintScopeInitialized = false;
+let formBindingsInitialized = false;
 
 function hasOpenModal(){{
-  return ['mbg','config-modal-bg','sprint-modal-bg'].some(id=>document.getElementById(id)?.classList.contains('open'));
+  return ['mbg','config-modal-bg','sprint-modal-bg','skill-doc-modal-bg'].some(id=>document.getElementById(id)?.classList.contains('open'));
+}}
+
+function hasActiveDraft(){{
+  const draftInputs = [
+    'onboard-proj-name','onboard-proj-desc','new-proj-name','new-proj-desc',
+    'subproject-name','subproject-substack-custom','subproject-repo',
+    'subproject-name-config','subproject-substack-custom-config','subproject-repo-config'
+  ];
+  return draftInputs.some(id=>((document.getElementById(id)?.value)||'').trim());
 }}
 
 setInterval(()=>{{
   let c=document.getElementById('cd');
-  if(!c||hasOpenModal())return;
+  if(!c||hasOpenModal()||hasActiveDraft())return;
   c.textContent=+c.textContent-1;
   if(+c.textContent<=0)location.reload();
 }},1000);
@@ -1116,22 +1152,189 @@ function updModels(){{
 }}
 updModels();
 
-function slugifyProjectId(name){{
-  return (name||'')
-    .normalize('NFD').replace(/[\\u0300-\\u036f]/g,'')
-    .toUpperCase()
-    .replace(/[^A-Z0-9]+/g,'_')
-    .replace(/^_+|_+$/g,'')
-    .slice(0,32);
+function storageKey(name){{
+  return `veloxiq:${{name}}`;
 }}
 
-function updateGeneratedProjectId(scope='config'){{
-  const name=document.getElementById(scope==='onboard' ? 'onboard-proj-name' : 'new-proj-name')?.value||'';
-  const idField=document.getElementById(scope==='onboard' ? 'onboard-proj-id' : 'new-proj-id');
-  if(idField)idField.value=slugifyProjectId(name);
+function collectProjectDraft(scope='config'){{
+  return {{
+    name:(document.getElementById(scope==='onboard' ? 'onboard-proj-name' : 'new-proj-name')?.value||'').trim(),
+    description:(document.getElementById(scope==='onboard' ? 'onboard-proj-desc' : 'new-proj-desc')?.value||'').trim(),
+  }};
 }}
 
-function refreshSubprojectForm(scope='main'){{
+function collectSubprojectDraft(scope='main'){{
+  const suffix=scope==='config' ? '-config' : '';
+  return {{
+    label:(document.getElementById('subproject-name'+suffix)?.value||'').trim(),
+    stack_key:(document.getElementById('subproject-stack'+suffix)?.value||'BACK').trim(),
+    baseSubstack:(document.getElementById('subproject-substack'+suffix)?.value||'').trim(),
+    customSubstack:(document.getElementById('subproject-substack-custom'+suffix)?.value||'').trim(),
+    repo_url:(document.getElementById('subproject-repo'+suffix)?.value||'').trim(),
+    skills:Array.from(document.getElementById('subproject-skills'+suffix)?.selectedOptions||[]).map(option=>option.value),
+    dev_model_profile:(document.getElementById('subproject-dev-model'+suffix)?.value||'').trim(),
+    qa_model_profile:(document.getElementById('subproject-qa-model'+suffix)?.value||'').trim(),
+  }};
+}}
+
+function saveProjectDraft(scope='config'){{
+  localStorage.setItem(storageKey('project-draft-'+scope), JSON.stringify(collectProjectDraft(scope)));
+}}
+
+function saveSubprojectDraft(scope='main'){{
+  localStorage.setItem(storageKey('subproject-draft-'+scope), JSON.stringify(collectSubprojectDraft(scope)));
+}}
+
+function restoreProjectDraft(scope='config'){{
+  try {{
+    const raw=localStorage.getItem(storageKey('project-draft-'+scope));
+    if(!raw)return;
+    const draft=JSON.parse(raw);
+    const nameField=document.getElementById(scope==='onboard' ? 'onboard-proj-name' : 'new-proj-name');
+    const descField=document.getElementById(scope==='onboard' ? 'onboard-proj-desc' : 'new-proj-desc');
+    if(nameField && !nameField.value)nameField.value=draft.name||'';
+    if(descField && !descField.value)descField.value=draft.description||'';
+  }} catch(_err) {{}}
+}}
+
+function restoreSubprojectDraft(scope='main'){{
+  try {{
+    const raw=localStorage.getItem(storageKey('subproject-draft-'+scope));
+    if(!raw)return;
+    const draft=JSON.parse(raw);
+    const suffix=scope==='config' ? '-config' : '';
+    const stackField=document.getElementById('subproject-stack'+suffix);
+    if(stackField && draft.stack_key)stackField.value=draft.stack_key;
+    refreshSubprojectForm(scope, draft);
+    const labelField=document.getElementById('subproject-name'+suffix);
+    const customSubstackField=document.getElementById('subproject-substack-custom'+suffix);
+    const repoField=document.getElementById('subproject-repo'+suffix);
+    const substackField=document.getElementById('subproject-substack'+suffix);
+    const devModelField=document.getElementById('subproject-dev-model'+suffix);
+    const qaModelField=document.getElementById('subproject-qa-model'+suffix);
+    if(labelField && !labelField.value)labelField.value=draft.label||'';
+    if(customSubstackField && !customSubstackField.value)customSubstackField.value=draft.customSubstack||'';
+    if(repoField && !repoField.value)repoField.value=draft.repo_url||'';
+    if(substackField && draft.baseSubstack)substackField.value=draft.baseSubstack;
+    if(devModelField && draft.dev_model_profile)devModelField.value=draft.dev_model_profile;
+    if(qaModelField && draft.qa_model_profile)qaModelField.value=draft.qa_model_profile;
+    const skillsField=document.getElementById('subproject-skills'+suffix);
+    if(skillsField && Array.isArray(draft.skills)){{
+      Array.from(skillsField.options).forEach(option=>option.selected=draft.skills.includes(option.value));
+    }}
+  }} catch(_err) {{}}
+}}
+
+function clearProjectDraft(scope='config'){{
+  localStorage.removeItem(storageKey('project-draft-'+scope));
+}}
+
+function clearSubprojectDraft(scope='main'){{
+  localStorage.removeItem(storageKey('subproject-draft-'+scope));
+}}
+
+function bindDraftPersistence(){{
+  if(formBindingsInitialized)return;
+  formBindingsInitialized = true;
+  [['onboard-proj-name','onboard'],['onboard-proj-desc','onboard'],['new-proj-name','config'],['new-proj-desc','config']].forEach(([id, scope])=>{{
+    const node=document.getElementById(id);
+    if(node)node.addEventListener('input',()=>saveProjectDraft(scope));
+  }});
+  ['main','config'].forEach(scope=>{{
+    const suffix=scope==='config' ? '-config' : '';
+    ['subproject-name','subproject-stack','subproject-substack','subproject-substack-custom','subproject-repo','subproject-dev-model','subproject-qa-model'].forEach(base=>{{
+      const node=document.getElementById(base+suffix);
+      const eventName=(base==='subproject-stack' || base==='subproject-substack' || base==='subproject-dev-model' || base==='subproject-qa-model') ? 'change' : 'input';
+      if(node)node.addEventListener(eventName,()=>saveSubprojectDraft(scope));
+    }});
+    const skills=document.getElementById('subproject-skills'+suffix);
+    if(skills)skills.addEventListener('change',()=>saveSubprojectDraft(scope));
+  }});
+}}
+
+function resolveSubstackForScope(scope='main'){{
+  const suffix=scope==='config' ? '-config' : '';
+  const baseSubstack=(document.getElementById('subproject-substack'+suffix)?.value||'').trim();
+  const customSubstack=(document.getElementById('subproject-substack-custom'+suffix)?.value||'').trim();
+  return ((baseSubstack==='__custom__' ? '' : baseSubstack) || customSubstack).trim();
+}}
+
+async function loadSubstackSkillDocs(scope='main'){{
+  const suffix=scope==='config' ? '-config' : '';
+  const stack=(document.getElementById('subproject-stack'+suffix)?.value||'').trim();
+  const substack=resolveSubstackForScope(scope);
+  const target=document.getElementById('subproject-skill-docs'+suffix);
+  if(!target)return;
+  if(!stack || !substack){{
+    target.innerHTML='<div class="skill-doc-empty">Selecciona o crea un substack para administrar sus documentos .md.</div>';
+    return;
+  }}
+  const url=`/api/substack-docs?stack_key=${{encodeURIComponent(stack)}}&substack=${{encodeURIComponent(substack)}}`;
+  const response=await fetch(url);
+  const data=await response.json();
+  if(!data.ok){{
+    target.innerHTML='<div class="skill-doc-empty">No se pudieron cargar los documentos del substack.</div>';
+    return;
+  }}
+  SUBSTACK_DOCS_CACHE[`${{stack}}::${{substack}}`] = data.docs||[];
+  renderSubstackSkillDocs(scope);
+}}
+
+function renderSubstackSkillDocs(scope='main'){{
+  const suffix=scope==='config' ? '-config' : '';
+  const target=document.getElementById('subproject-skill-docs'+suffix);
+  if(!target)return;
+  const stack=(document.getElementById('subproject-stack'+suffix)?.value||'').trim();
+  const substack=resolveSubstackForScope(scope);
+  const docs=SUBSTACK_DOCS_CACHE[`${{stack}}::${{substack}}`]||[];
+  if(!stack || !substack){{
+    target.innerHTML='<div class="skill-doc-empty">Selecciona o crea un substack para administrar sus documentos .md.</div>';
+    return;
+  }}
+  if(!docs.length){{
+    target.innerHTML='<div class="skill-doc-empty">Todavia no hay documentos .md guardados para este substack.</div>';
+    return;
+  }}
+  target.innerHTML=docs.map(doc=>`<div class="skill-doc-item"><div><div style="font-size:12px;font-weight:700">${{doc.title}}</div><div style="font-size:11px;color:#64748b">${{doc.id}}.md</div></div><button class="btn btn-outline btn-sm" type="button" onclick="openSkillDocModal('${{scope}}','${{doc.id}}')">Editar</button></div>`).join('');
+}}
+
+function openSkillDocModal(scope='main', docId=''){{
+  const stack=(document.getElementById('subproject-stack'+(scope==='config' ? '-config' : ''))?.value||'').trim();
+  const substack=resolveSubstackForScope(scope);
+  if(!stack || !substack){{alert('Primero selecciona o crea un substack.');return;}}
+  document.getElementById('skill-doc-scope').value=scope;
+  document.getElementById('skill-doc-id').value=docId||'';
+  const docs=SUBSTACK_DOCS_CACHE[`${{stack}}::${{substack}}`]||[];
+  const existing=docs.find(item=>item.id===docId) || null;
+  document.getElementById('skill-doc-title').value=existing?.title||'';
+  document.getElementById('skill-doc-content').value=existing?.content||'';
+  document.getElementById('skill-doc-modal-bg').classList.add('open');
+}}
+
+function closeSkillDocModal(){{
+  document.getElementById('skill-doc-modal-bg').classList.remove('open');
+  document.getElementById('skill-doc-id').value='';
+  document.getElementById('skill-doc-title').value='';
+  document.getElementById('skill-doc-content').value='';
+}}
+
+async function saveSkillDoc(){{
+  const scope=document.getElementById('skill-doc-scope').value||'main';
+  const suffix=scope==='config' ? '-config' : '';
+  const stack_key=(document.getElementById('subproject-stack'+suffix)?.value||'').trim();
+  const substack=resolveSubstackForScope(scope);
+  const title=(document.getElementById('skill-doc-title').value||'').trim();
+  const content=(document.getElementById('skill-doc-content').value||'').trim();
+  const doc_id=(document.getElementById('skill-doc-id').value||'').trim();
+  if(!title || !content){{alert('Titulo y contenido son obligatorios.');return;}}
+  const response=await fetch('/api/substack-docs',{{method:'POST',headers:{{'Content-Type':'application/json'}},body:JSON.stringify({{stack_key,substack,title,content,doc_id}})}});
+  const data=await response.json();
+  if(!data.ok){{alert('Error: '+(data.error||''));return;}}
+  await loadSubstackSkillDocs(scope);
+  closeSkillDocModal();
+}}
+
+function refreshSubprojectForm(scope='main', draft=null){{
   const suffix=scope==='config' ? '-config' : '';
   const stack=document.getElementById('subproject-stack'+suffix)?.value||'BACK';
   const substackSelect=document.getElementById('subproject-substack'+suffix);
@@ -1139,25 +1342,30 @@ function refreshSubprojectForm(scope='main'){{
   const skillsSelect=document.getElementById('subproject-skills'+suffix);
   if(substackSelect){{
     const options=SUBSTACK_OPTIONS[stack]||[];
-    const current=substackSelect.value;
+    const current=(draft?.baseSubstack)||substackSelect.value;
     substackSelect.innerHTML=options.map(value=>`<option value="${{value}}">${{value}}</option>`).join('') + '<option value="__custom__">Crear nuevo...</option>';
     if(current && (options.includes(current) || current==='__custom__'))substackSelect.value=current;
   }}
   if(customSubstackInput){{
     customSubstackInput.disabled=(substackSelect?.value||'')!=='__custom__';
-    if(customSubstackInput.disabled)customSubstackInput.value='';
+    if(!customSubstackInput.disabled && draft?.customSubstack)customSubstackInput.value=draft.customSubstack;
   }}
   if(skillsSelect){{
     const selectedSubstack=(substackSelect?.value||'')==='__custom__' ? '' : (substackSelect?.value||'');
     const recommended=TEAM_PRESETS.find(team=>((team.stack_key||'')===stack) && (!(team.substacks||[]).length || (team.substacks||[]).includes(selectedSubstack)));
     const allowed=Object.entries(SPECS).filter(([key, spec])=>spec.role!=='pm' && spec.role!=='orchestrator' && (spec.stack_key||'')===stack);
     skillsSelect.innerHTML=allowed.map(([key, spec])=>`<option value="${{key}}">${{spec.label}}</option>`).join('');
-    Array.from(skillsSelect.options).forEach(option=>option.selected=(recommended?.skills||[]).includes(option.value));
+    const selectedSkills=Array.isArray(draft?.skills) && draft.skills.length ? draft.skills : (recommended?.skills||[]);
+    Array.from(skillsSelect.options).forEach(option=>option.selected=selectedSkills.includes(option.value));
   }}
   const devModel=document.getElementById('subproject-dev-model'+suffix);
   const qaModel=document.getElementById('subproject-qa-model'+suffix);
-  if(devModel && !devModel.value && SYSTEM_ROLE_DEFAULTS.developers)devModel.value=SYSTEM_ROLE_DEFAULTS.developers;
-  if(qaModel && !qaModel.value && SYSTEM_ROLE_DEFAULTS.qa)qaModel.value=SYSTEM_ROLE_DEFAULTS.qa;
+  if(devModel && draft?.dev_model_profile)devModel.value=draft.dev_model_profile;
+  else if(devModel && !devModel.value && SYSTEM_ROLE_DEFAULTS.developers)devModel.value=SYSTEM_ROLE_DEFAULTS.developers;
+  if(qaModel && draft?.qa_model_profile)qaModel.value=draft.qa_model_profile;
+  else if(qaModel && !qaModel.value && SYSTEM_ROLE_DEFAULTS.qa)qaModel.value=SYSTEM_ROLE_DEFAULTS.qa;
+  saveSubprojectDraft(scope);
+  loadSubstackSkillDocs(scope).catch(()=>null);
 }}
 
 function refreshSpecializationOptions(){{
@@ -1226,6 +1434,11 @@ refreshSprintScope();
 toggleTeamMode();
 refreshSubprojectForm();
 refreshSubprojectForm('config');
+restoreProjectDraft('onboard');
+restoreProjectDraft('config');
+restoreSubprojectDraft('main');
+restoreSubprojectDraft('config');
+bindDraftPersistence();
 
 async function addAgent(){{
   const spec=document.getElementById('ns').value;
@@ -1354,7 +1567,7 @@ async function loadProjectList(){{
   const projects=await r.json();
   let html='<div style="font-size:10px;color:#64748b;margin-bottom:8px">Cambiar proyecto:</div>';
   for(const p of projects){{
-    html+=`<button class="btn btn-outline btn-sm" style="width:100%;text-align:left;margin-bottom:4px;padding:6px;font-size:11px" onclick="selectProject('${{p.project_id}}')">✓ ${{p.project_id}}: ${{p.name}}</button>`;
+    html+=`<button class="btn btn-outline btn-sm" style="width:100%;text-align:left;margin-bottom:4px;padding:6px;font-size:11px" onclick="selectProject('${{p.project_id}}')">✓ ${{p.name}}</button>`;
   }}
   document.getElementById('project-list').innerHTML=html;
 }}
@@ -1374,23 +1587,21 @@ async function selectProject(projectId){{
 }}
 
 async function createProject(){{
-  const id=(document.getElementById('onboard-proj-id')?.value||document.getElementById('new-proj-id')?.value||'').trim();
   const name=(document.getElementById('onboard-proj-name')?.value||document.getElementById('new-proj-name')?.value||'').trim();
   const desc=(document.getElementById('onboard-proj-desc')?.value||document.getElementById('new-proj-desc')?.value||'').trim();
   const template_id=document.getElementById('project-template-sel')?.value||'software_delivery_default';
   if(!name||!desc){{alert('Nombre y descripcion son requeridos');return;}}
-  if(!id){{alert('No se pudo generar un ID valido para el proyecto');return;}}
   const r=await fetch('/api/projects/create',{{method:'POST',headers:{{'Content-Type':'application/json'}},
-    body:JSON.stringify({{project_id:id,name,description:desc,git_dirs:{{}},template_id}})}});
+    body:JSON.stringify({{name,description:desc,git_dirs:{{}},template_id}})}});
   const d=await r.json();
   if(d.ok){{
-    alert('Proyecto '+id+' creado correctamente');
-    if(document.getElementById('new-proj-id'))document.getElementById('new-proj-id').value='';
+    alert('Proyecto creado correctamente');
     if(document.getElementById('new-proj-name'))document.getElementById('new-proj-name').value='';
     if(document.getElementById('new-proj-desc'))document.getElementById('new-proj-desc').value='';
-    if(document.getElementById('onboard-proj-id'))document.getElementById('onboard-proj-id').value='';
     if(document.getElementById('onboard-proj-name'))document.getElementById('onboard-proj-name').value='';
     if(document.getElementById('onboard-proj-desc'))document.getElementById('onboard-proj-desc').value='';
+    clearProjectDraft('onboard');
+    clearProjectDraft('config');
     loadProjectList();
     location.reload();
   }}
@@ -1415,6 +1626,7 @@ async function createSubproject(scope='main'){{
     body:JSON.stringify({{label,stack_key,substack,repo_url,skills,dev_model_profile,qa_model_profile}})}});  
   const d=await r.json();
   if(!d.ok){{alert('Error: '+(d.error||''));return;}}
+  clearSubprojectDraft(scope);
   alert('Subproyecto guardado');
   location.reload();
 }}
@@ -1590,6 +1802,13 @@ class Handler(BaseHTTPRequestHandler):
             sprint_id = qs.get("sprint",[""])[0]
             data=build_data(sprint_id);html=render_settings_page(data).encode("utf-8")
             self.send_response(200);self.send_header("Content-Type","text/html; charset=utf-8");self.send_header("Content-Length",len(html));self.end_headers();self.wfile.write(html)
+        elif p == "/api/substack-docs":
+            try:
+                stack_key = qs.get("stack_key", [""])[0]
+                substack = qs.get("substack", [""])[0]
+                self._json({"ok": True, "docs": list_skill_docs(stack_key, substack)})
+            except Exception as e:
+                self._json({"ok": False, "error": str(e)}, 400)
         elif p.startswith("/api/agents/") and p.endswith("/log"):
             self._text(get_log(p.split("/")[3], lines=80))
         elif p.startswith("/api/tasks/"):
@@ -1772,6 +1991,18 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 settings = save_platform_settings(body)
                 self._json({"ok": True, "settings": settings})
+            except Exception as e:
+                self._json({"ok": False, "error": str(e)}, 400)
+        elif p == "/api/substack-docs":
+            try:
+                doc = save_skill_doc(
+                    body.get("stack_key", ""),
+                    body.get("substack", ""),
+                    body.get("title", ""),
+                    body.get("content", ""),
+                    body.get("doc_id", ""),
+                )
+                self._json({"ok": True, "doc": doc})
             except Exception as e:
                 self._json({"ok": False, "error": str(e)}, 400)
         elif p.startswith("/api/projects/") and p.endswith("/config"):
