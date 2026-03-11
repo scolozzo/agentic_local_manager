@@ -11,6 +11,12 @@ La plataforma coordina estos roles principales:
 - `Developers`: ejecutan trabajo dentro del sprint y subproyecto activo.
 - `QA`: revisa entregables, crea fix tasks y certifica salidas.
 
+## Política de ramas
+
+- `feature/gui_windows_installer` es una línea fork específica para Windows.
+- Esta rama no debe fusionarse en `develop`.
+- Sólo los fixes de nivel proyecto que se seleccionen explícitamente y se reapliquen sin archivos específicos del instalador pueden llevarse a `develop`.
+
 La rama `develop` actual soporta:
 
 - composición reutilizable de prompts por `role + stack + specialization`
